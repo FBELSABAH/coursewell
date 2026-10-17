@@ -67,3 +67,21 @@ PYTHONPATH=.:dashboard python -m unittest discover -s dashboard -p 'test_*.py' -
 
 Read `AGENTS.md` for rendered frontend verification requirements. Offline tests do
 not confirm live Microsoft/Google authentication or successful remote sync.
+
+
+### Separate Google calendars and assessment colors
+
+Sync keeps regular classes in **Coursewell · Classes** and deadlines in
+**Coursewell · Assessments**. Both appear independently in Google Calendar's
+calendar list, where either can be hidden. Exams/tests are red, quizzes yellow,
+assignments blue, other assessments purple, and classes gray. Categories use
+explicit title keywords; an unrecognized assessment remains a general assessment.
+The local preview includes the same categories and a labeled color legend.
+
+The previous university calendar is reused for Classes. Existing managed
+assessment records, including past dates, migrate with deterministic event IDs:
+copy to Assessments, verify, then remove the unedited original using its ETag.
+Progress is persisted for safe retries after interruptions. Manually edited,
+deleted, or enriched Google events are preserved and reported for review.
+No broader Google OAuth scope is required. After an expired authorization,
+reconnect Google and click **Sync calendar now** to apply the split.

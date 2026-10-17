@@ -1406,3 +1406,20 @@ nav button,.side-course{
   color:var(--green);
   text-decoration:underline
 }
+
+/* Assessment categories match the Google event palette; text labels also identify types. */
+.cal-type-exam { --event-color:#d50000; }
+.cal-type-quiz { --event-color:#b18400; }
+.cal-type-assignment { --event-color:#3f51b5; }
+.cal-type-class { --event-color:#616161; }
+.cal-type-assessment { --event-color:#8e24aa; }
+.cal-legend { display:flex; flex-wrap:wrap; gap:10px 20px; margin:18px 0; font-size:12px; color:var(--muted); }
+.cal-legend span { display:inline-flex; align-items:center; gap:7px; }
+.cal-legend i { width:9px; height:9px; border-radius:50%; background:var(--event-color); }
+.cal-event[class*="cal-type-"] { border-left:3px solid var(--event-color); background:var(--surface); }
+.cal-item[class*="cal-type-"] { border-left:3px solid var(--event-color); padding-left:12px; }
+[data-theme="dark"] .cal-type-exam { --event-color:#ff8585; }
+[data-theme="dark"] .cal-type-quiz { --event-color:#edc45f; }
+[data-theme="dark"] .cal-type-assignment { --event-color:#97a9ff; }
+[data-theme="dark"] .cal-type-class { --event-color:#aeb6bb; }
+[data-theme="dark"] .cal-type-assessment { --event-color:#d69bea; }

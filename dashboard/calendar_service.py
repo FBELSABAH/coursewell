@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import threading
@@ -16,7 +17,31 @@ from zoneinfo import ZoneInfo
 import requests
 
 SCOPE = 'https://www.googleapis.com/auth/calendar.app.created'
-CALENDAR_NAME = 'University — Fall 2026'
+CALENDAR_NAME = 'Coursewell · Classes'
+CALENDAR_NAMES = {'classes': CALENDAR_NAME, 'assessments': 'Coursewell · Assessments'}
+EVENT_COLORS = {'class': '8', 'exam': '11', 'quiz': '5', 'assignment': '9', 'assessment': '3'}
+
+
+def event_category(event):
+    if event.get('source_type') == 'class_schedule' or event.get('kind') == 'Class':
+        return 'class'
+    title = event.get('title', event.get('summary', '')).casefold()
+    if re.search(r'\bquiz(?:zes)?\b', title):
+        return 'quiz'
+    if re.search(r'\b(?:exam(?:ination)?s?|mid[ -]?terms?|finals?|tests?)\b', title):
+        return 'exam'
+    if re.search(r'\b(?:assignments?|homework|problem sets?|projects?|concept deck|reports?|essays?|lab submissions?)\b', title):
+        return 'assignment'
+    return 'assessment'
+
+
+def calendar_group(event):
+    return 'classes' if event_category(event) == 'class' else 'assessments'
+
+
+def calendar_url(calendar_id):
+    return 'https://calendar.google.com/calendar/u/0/r?' + urlencode({'cid': calendar_id})
+
 
 
 def private_write(path, value):
@@ -63,9 +88,9 @@ def preview(events, today=None):
         elif not event.get('sources') and not event.get('confirmed_by_user'):
             reason = 'No source evidence'
         if reason:
-            held.append(dict(event, hold_reason=reason))
+            held.append(dict(event, hold_reason=reason, calendar_category=event_category(event)))
         else:
-            ready.append(event)
+            ready.append(dict(event, calendar_category=event_category(event)))
     return {'ready': ready, 'held': held}
 
 
@@ -85,7 +110,7 @@ def event_body(event):
         if source.get('url', '').startswith('https://'):
             description.append(source['url'])
     body = {'summary': event['course'] + ' — ' + event.get('display_title', event['title']),
-            'description': '\n'.join(description),
+            'description': '\n'.join(description), 'colorId': EVENT_COLORS[event_category(event)],
             'start': {'date': day.isoformat()}, 'end': {'date': (day + timedelta(days=1)).isoformat()},
             'reminders': {'useDefault': False, 'overrides': [{'method': 'popup', 'minutes': 900}]}}
     if timed:
@@ -106,7 +131,7 @@ def event_body(event):
 
 def managed_body(event):
     """Google may reorder reminders or serialize a timestamp in UTC."""
-    result = {k: deepcopy(event.get(k)) for k in ('summary', 'description', 'start', 'end', 'reminders')}
+    result = {k: deepcopy(event.get(k)) for k in ('summary', 'description', 'start', 'end', 'reminders', 'colorId')}
     for key in ('start', 'end'):
         value = result[key] or {}
         if value.get('dateTime'):
@@ -168,7 +193,11 @@ class CalendarService:
             return {k: deepcopy(self.state.get(k)) for k in ('enabled', 'message', 'last_sync', 'counts', 'warnings', 'result', 'needs_reconnect', 'source_status')} | {
                 'configured': bool(self.credentials), 'connected': bool(self.tokens.get('refresh_token')),
                 'busy': self.busy, 'calendar_name': CALENDAR_NAME,
-                'calendar_url': ('https://calendar.google.com/calendar/u/0/r?'+urlencode({'cid': self.state['calendar_id']})) if self.state.get('calendar_id') else None}
+                'calendar_url': calendar_url(self.state['calendar_id']) if self.state.get('calendar_id') else None,
+                'calendars': [{'key': key, 'name': name, 'url': calendar_url(cid)}
+                              for key, name in CALENDAR_NAMES.items()
+                              if (cid := self.state.get('calendar_ids', {}).get(key))]}
+
 
     def authorize(self):
         with self.lock:
@@ -344,42 +373,125 @@ class CalendarService:
             if again:
                 self.start()
 
+    @staticmethod
+    def events_base(calendar_id):
+        return 'calendars/' + quote(calendar_id, safe='') + '/events/'
+
+    def ensure_calendars(self):
+        ids = self.state.setdefault('calendar_ids', {})
+        if self.state.get('calendar_id') and not ids.get('classes'):
+            ids['classes'] = self.state['calendar_id']
+        pending = self.state.setdefault('calendar_creation_pending', {})
+        for group, name in CALENDAR_NAMES.items():
+            if not ids.get(group):
+                if pending.get(group) or (group == 'classes' and self.state.get('creation_pending')):
+                    raise CalendarError('Calendar creation had an uncertain result. Check Google Calendar before retrying; no duplicate will be created.')
+                pending[group] = True
+                self.save()
+                try:
+                    code, calendar = self.api('POST', 'calendars', {
+                        'summary': name, 'timeZone': 'America/Halifax',
+                        'description': 'Fall 2026 ' + group + ' managed by Coursewell.'})
+                except GoogleError as exc:
+                    if exc.status < 500:
+                        pending[group] = False
+                        self.state['creation_pending'] = False
+                        self.save()
+                    raise
+                if code not in (200, 201) or not calendar.get('id'):
+                    raise CalendarError('Calendar creation could not be verified. Check Google Calendar before retrying.')
+                ids[group] = calendar['id']
+                pending[group] = False
+                if group == 'classes':
+                    self.state.update(calendar_id=calendar['id'], creation_pending=False)
+                self.save()
+            path = 'calendars/' + quote(ids[group], safe='')
+            code, calendar = self.api('GET', path)
+            if code != 200:
+                raise CalendarError('A saved Coursewell calendar is unavailable. Reconnect the original Google account or restore it.')
+            if calendar.get('summary') != name:
+                code, _ = self.api('PATCH', path, {'summary': name})
+                if code != 200:
+                    raise CalendarError('Could not update the Coursewell calendar name. Retry sync.')
+        return ids
+
+    def migrate_record(self, record, origin, destination, warnings):
+        """Copy, verify, then remove the original using its ETag.
+
+        events.move requires broader permissions than calendar.app.created. This
+        resumable migration keeps our existing narrow scope and deterministic IDs.
+        """
+        event_id = record['event_id']
+        source_path = self.events_base(origin) + event_id
+        target_path = self.events_base(destination) + event_id
+        desired = deepcopy(record['body'])
+        desired['colorId'] = EVENT_COLORS[event_category({'summary': desired['summary']})]
+        source_code, source = self.api('GET', source_path)
+        target_code, target = self.api('GET', target_path)
+        title = desired['summary']
+        def matches(remote):
+            return remote.get('status') != 'cancelled' and managed_body(remote) == managed_body(desired)
+        if source_code in (404, 410) or source.get('status') == 'cancelled':
+            if record.get('migration_target') == destination and target_code == 200 and matches(target):
+                record.update(calendar_id=destination, body=desired)
+                record.pop('migration_target', None)
+                self.save()
+            else:
+                warnings.append('Missing or deleted Google event was not migrated: ' + title)
+            return
+        if (managed_body(source) != managed_body(record['body']) or not source.get('etag')
+                or any(source.get(field) for field in ('attendees', 'attachments', 'recurrence', 'conferenceData'))
+                or source.get('visibility', 'default') != 'default'
+                or source.get('eventType', 'default') != 'default'):
+            warnings.append('Edited in Google; kept in its current calendar: ' + title)
+            return
+        if target_code not in (200, 404, 410):
+            raise CalendarError('Could not inspect the destination calendar. Retry sync.')
+        record['migration_target'] = destination
+        self.save()
+        if target_code in (404, 410):
+            target_code, target = self.api('POST', self.events_base(destination).rstrip('/'), desired | {
+                'id': event_id, 'extendedProperties': {'private': {'academicAssistant': 'v1'}}})
+            if target_code == 409:
+                target_code, target = self.api('GET', target_path)
+        if target_code not in (200, 201) or not matches(target):
+            warnings.append('Destination event could not be verified; original preserved: ' + title)
+            return
+        code, _ = self.api('DELETE', source_path, etag=source['etag'])
+        if code not in (200, 204, 404, 410):
+            warnings.append('Calendar transfer needs retry; original preserved: ' + title)
+            return
+        record.update(calendar_id=destination, body=desired)
+        record.pop('migration_target', None)
+        self.save()
+
     def sync(self, events):
         plan = preview(events)
         warnings = []
         if self.state.get('source_status', {}).get('status') == 'error':
             warnings.append('Moodle calendar could not refresh. Previous Google events were preserved; click Update Moodle to retry.')
         counts = {'added': 0, 'updated': 0, 'unchanged': 0, 'held': len(plan['held'])}
-        if not self.state.get('calendar_id'):
-            if self.state.get('creation_pending'):
-                raise CalendarError('Calendar creation had an uncertain result. Check Google Calendar before retrying setup; the app will not create a duplicate.')
-            self.state['creation_pending'] = True
-            self.save()
-            try:
-                code, calendar = self.api('POST', 'calendars', {'summary': CALENDAR_NAME, 'timeZone': 'America/Halifax',
-                                          'description': 'Assessment dates managed by Coursewell. Moodle calendar times are exact; document-only dates are all-day.'})
-            except GoogleError as exc:
-                if exc.status < 500:
-                    self.state['creation_pending'] = False
-                    self.save()
-                raise
-            if code != 200 or not calendar.get('id'):
-                raise CalendarError('Could not create the university calendar. Check Google Calendar before retrying.')
-            self.state.update(calendar_id=calendar['id'], creation_pending=False)
-            self.save()
-        base = 'calendars/'+quote(self.state['calendar_id'], safe='')+'/events/'
-        # A different Google account cannot access this app-created calendar: fail,
-        # preserving the mapping instead of silently duplicating it in another account.
-        status, _ = self.api('GET', 'calendars/'+quote(self.state['calendar_id'], safe=''))
-        if status != 200:
-            raise CalendarError('The saved university calendar is unavailable. Reconnect the original Google account or restore the calendar.')
+        calendar_ids = self.ensure_calendars()
         records = self.state.setdefault('records', {})
+        # Include past and held records: splitting calendars must not strand older
+        # managed events in the Classes calendar. Never invent missing events.
+        by_key = {identity(e): e for e in events}
+        for key, record in records.items():
+            if record.get('cancelled'):
+                continue
+            event = by_key.get(key)
+            group = calendar_group(event) if event else ('classes' if '|moodle:class:' in key else 'assessments')
+            destination = calendar_ids[group]
+            origin = record.get('calendar_id', self.state['calendar_id'])
+            if origin != destination:
+                self.migrate_record(record, origin, destination, warnings)
         cancelled = [e for e in events if e.get('cancelled') and e.get('source_type') == 'moodle_calendar' and not e.get('review')]
         for event in cancelled:
             key = identity(event)
             record = records.get(key)
             if not record or record.get('cancelled'):
                 continue
+            base = self.events_base(record.get('calendar_id', self.state['calendar_id']))
             code, remote = self.api('GET', base+record['event_id'])
             if code in (404, 410) or remote.get('status') == 'cancelled':
                 record['cancelled'] = True
@@ -404,6 +516,11 @@ class CalendarService:
                 records[key] = records.pop(legacy_key)
                 self.save()
             record = records.get(key)
+            destination = calendar_ids[calendar_group(event)]
+            if record and record.get('calendar_id', self.state['calendar_id']) != destination:
+                # Migration could not be verified; do not create a second event.
+                continue
+            base = self.events_base(destination)
             event_id = record['event_id'] if record else hashlib.sha256(('academic-assistant-v1|'+key).encode()).hexdigest()
             body = event_body(event)
             digest = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
@@ -443,7 +560,7 @@ class CalendarService:
                     counts['updated'] += 1
                 else:
                     counts['unchanged'] += 1
-            records[key] = {'body': body, 'digest': digest, 'event_id': event_id}
+            records[key] = {'body': body, 'digest': digest, 'event_id': event_id, 'calendar_id': destination}
             self.save()
         for key in records.keys()-eligible-past:
             if records[key].get('cancelled'):

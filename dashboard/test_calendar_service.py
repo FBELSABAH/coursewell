@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
-from calendar_service import CalendarService, CalendarError, GoogleError, event_body, managed_body, preview, SCOPE
+from calendar_service import CalendarService, CalendarError, GoogleError, event_body, managed_body, preview, SCOPE, EVENT_COLORS, event_category, identity
 
 
 def assessment(**overrides):
@@ -18,7 +18,7 @@ class CalendarTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory()
         self.service=CalendarService(Path(self.tmp.name), lambda:{'events':[]})
-        self.remote={};self.writes=[]
+        self.remote={};self.writes=[];self.calendars={}
         self.service.api=self.api
         self.today=patch('calendar_service.datetime', wraps=datetime)
         mocked=self.today.start();mocked.now.return_value=datetime.fromisoformat('2026-10-02T12:00:00-03:00')
@@ -28,8 +28,9 @@ class CalendarTests(unittest.TestCase):
 
     def api(self, method, path, body=None, etag=None):
         if method=='POST' and path=='calendars':
-            self.writes.append(('calendar',body));return 200,{'id':'test-calendar'}
-        if '/events' not in path:return 200,{'id':'test-calendar'}
+            cid='test-'+str(len(self.calendars)); self.calendars[cid]=dict(body,id=cid)
+            self.writes.append(('calendar',body));return 200,self.calendars[cid]
+        if '/events' not in path:return 200,self.calendars.get(path.split('/')[-1],{'summary':'Coursewell · Classes'})
         key=path.split('/')[-1]
         if method=='GET':return (200,deepcopy(self.remote[key])) if key in self.remote else (404,{})
         if method=='POST':
@@ -55,7 +56,7 @@ class CalendarTests(unittest.TestCase):
         self.service.sync([assessment()]);self.service.sync([assessment()])
         restarted=CalendarService(Path(self.tmp.name), lambda:{'events':[]});restarted.api=self.api
         restarted.sync([assessment()])
-        self.assertEqual([w[0] for w in self.writes],['calendar','event'])
+        self.assertEqual([w[0] for w in self.writes],['calendar','calendar','event'])
 
     def test_date_change_updates_same_event(self):
         self.service.sync([assessment()]);self.service.sync([assessment(date='2026-10-25')])
@@ -176,6 +177,160 @@ class CalendarTests(unittest.TestCase):
         with patch('calendar_service.time.sleep'):
             code,result=s.api('GET','calendars/example')
         self.assertEqual((code,result),(200,{'id':'ok'}));self.assertEqual(s.http.request.call_count,2)
+
+
+class SplitCalendarTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.service = CalendarService(Path(self.tmp.name), lambda: {'events': []})
+        self.remote = {}
+        self.calendars = {'legacy': {'id': 'legacy', 'summary': 'University — Fall 2026'}}
+        self.service.state.update(calendar_id='legacy', records={})
+        self.service.api = self.api
+        self.fail_delete = False
+        self.today = patch('calendar_service.datetime', wraps=datetime)
+        self.today.start().now.return_value = datetime.fromisoformat('2026-10-02T12:00:00-03:00')
+
+    def tearDown(self):
+        self.today.stop()
+        self.tmp.cleanup()
+
+    def api(self, method, path, body=None, etag=None):
+        parts = path.split('/')
+        if path == 'calendars':
+            cid = 'new-' + str(len(self.calendars))
+            self.calendars[cid] = dict(body, id=cid)
+            return 200, deepcopy(self.calendars[cid])
+        cid = parts[1]
+        if len(parts) == 2:
+            if method == 'PATCH':
+                self.calendars[cid].update(body)
+            return 200, deepcopy(self.calendars[cid])
+        eid = body['id'] if method == 'POST' else parts[3]
+        key = (cid, eid)
+        if method == 'GET':
+            return (200, deepcopy(self.remote[key])) if key in self.remote else (404, {})
+        if method == 'POST':
+            if key in self.remote: return 409, {}
+            self.remote[key] = dict(deepcopy(body), etag='version1')
+        elif method == 'PATCH':
+            self.assertEqual(etag, self.remote[key]['etag'])
+            self.remote[key].update(body)
+        elif method == 'DELETE':
+            if self.fail_delete: return 412, {}
+            self.assertEqual(etag, self.remote[key]['etag'])
+            self.remote.pop(key)
+            return 204, {}
+        return 200, deepcopy(self.remote[key])
+
+    def seed_legacy(self, e, eid='old-event'):
+        body = event_body(e)
+        body.pop('colorId')  # Previous releases did not manage colors.
+        self.remote[('legacy', eid)] = dict(deepcopy(body), etag='version1')
+        self.service.state['records'][identity(e)] = {'body': body, 'event_id': eid}
+
+    def test_color_categories(self):
+        for title, category in [('Midterm 2','exam'), ('In-class test','exam'), ('Final Exam','exam'),
+                                ('Quiz 2','quiz'), ('Assignment 4','assignment'), ('Concept Deck','assignment'),
+                                ('Registration closes','assessment')]:
+            self.assertEqual(event_category(assessment(title=title)), category)
+            self.assertEqual(event_body(assessment(title=title))['colorId'], EVENT_COLORS[category])
+        self.assertEqual(event_category(assessment(kind='Class')), 'class')
+
+    def test_legacy_assessment_moves_and_repeat_does_not_duplicate(self):
+        e = assessment()
+        self.seed_legacy(e)
+        self.service.sync([e])
+        self.service.sync([e])
+        self.assertEqual(len(self.remote), 1)
+        cid, eid = next(iter(self.remote))
+        self.assertNotEqual(cid, 'legacy')
+        self.assertEqual(eid, 'old-event')
+        self.assertEqual(self.remote[(cid,eid)]['colorId'], '11')
+        self.assertEqual(self.calendars['legacy']['summary'], 'Coursewell · Classes')
+        self.assertEqual(len(self.service.status()['calendars']), 2)
+
+    def test_legacy_class_stays_and_gets_neutral_color(self):
+        e=assessment(kind='Class', source_type='class_schedule', source_uid='class:1:2026-10-20',
+                     title='Lecture', start_at='2026-10-20T13:00:00-03:00', end_at='2026-10-20T14:00:00-03:00')
+        self.seed_legacy(e)
+        self.service.sync([e])
+        self.assertEqual(list(self.remote), [('legacy', 'old-event')])
+        self.assertEqual(self.remote[('legacy','old-event')]['colorId'], '8')
+
+    def test_past_assessment_is_migrated(self):
+        e = assessment(date='2026-09-20')
+        self.seed_legacy(e)
+        self.service.sync([e])
+        self.assertEqual(len(self.remote), 1)
+        self.assertNotIn(('legacy','old-event'), self.remote)
+
+    def test_manual_edit_does_not_create_destination_copy(self):
+        e = assessment()
+        self.seed_legacy(e)
+        self.remote[('legacy','old-event')]['summary'] = 'My custom title'
+        self.service.sync([e])
+        self.assertEqual(list(self.remote), [('legacy','old-event')])
+        self.assertIn('Edited in Google', self.service.state['warnings'][0])
+
+    def test_user_added_attendees_are_not_lost_during_migration(self):
+        e = assessment()
+        self.seed_legacy(e)
+        self.remote[('legacy','old-event')]['attendees'] = [{'email':'example@example.com'}]
+        self.service.sync([e])
+        self.assertEqual(list(self.remote), [('legacy','old-event')])
+        self.assertTrue(self.service.state['warnings'])
+
+    def test_partial_migration_resumes_after_restart(self):
+        e = assessment()
+        self.seed_legacy(e)
+        self.fail_delete = True
+        self.service.sync([e])
+        self.assertEqual(len(self.remote), 2)
+        restarted = CalendarService(Path(self.tmp.name), lambda: {'events': []})
+        restarted.api = self.api
+        self.fail_delete = False
+        restarted.sync([e])
+        self.assertEqual(len(self.remote), 1)
+        self.assertNotIn(('legacy','old-event'), self.remote)
+
+    def test_delete_succeeded_but_local_save_failed_recovers(self):
+        e = assessment()
+        self.seed_legacy(e)
+        save = self.service.save
+        def crash_after_delete():
+            if ('legacy','old-event') not in self.remote:
+                raise OSError('disk failure')
+            save()
+        self.service.save = crash_after_delete
+        with self.assertRaises(OSError): self.service.sync([e])
+        restarted = CalendarService(Path(self.tmp.name), lambda: {'events': []})
+        restarted.api = self.api
+        restarted.sync([e])
+        self.assertEqual(len(self.remote), 1)
+        self.assertFalse(restarted.state['warnings'])
+
+    def test_deleted_legacy_event_is_not_recreated(self):
+        e = assessment()
+        self.seed_legacy(e)
+        self.remote.clear()
+        self.service.sync([e])
+        self.assertFalse(self.remote)
+        self.assertTrue(self.service.state['warnings'])
+
+    def test_cancellation_uses_assessment_calendar(self):
+        e=assessment(source_type='moodle_calendar', source_uid='moodle-1')
+        self.service.sync([e])
+        self.service.sync([dict(e,cancelled=True)])
+        self.assertFalse(self.remote)
+
+    def test_user_color_edit_is_preserved(self):
+        e=assessment()
+        self.service.sync([e])
+        next(iter(self.remote.values()))['colorId']='6'
+        self.service.sync([e])
+        self.assertEqual(next(iter(self.remote.values()))['colorId'],'6')
+        self.assertTrue(self.service.state['warnings'])
 
 
 if __name__=='__main__':unittest.main()
