@@ -1,3 +1,4 @@
+import semester
 """App-owned Google OAuth and conservative, click-triggered Calendar sync."""
 import base64
 import fcntl
@@ -18,11 +19,13 @@ import requests
 
 SCOPE = 'https://www.googleapis.com/auth/calendar.app.created'
 CALENDAR_NAME = 'Coursewell · Classes'
-CALENDAR_NAMES = {'classes': CALENDAR_NAME, 'assessments': 'Coursewell · Assessments'}
-EVENT_COLORS = {'class': '8', 'exam': '11', 'quiz': '5', 'assignment': '9', 'assessment': '3'}
+CALENDAR_NAMES = {'classes': CALENDAR_NAME, 'assessments': 'Coursewell · Assessments', 'events': 'Coursewell · Events'}
+EVENT_COLORS = {'class': '8', 'exam': '11', 'quiz': '5', 'assignment': '9', 'assessment': '3', 'event': '10'}
 
 
 def event_category(event):
+    if event.get('kind') == 'Event':
+        return 'event'
     if event.get('source_type') == 'class_schedule' or event.get('kind') == 'Class':
         return 'class'
     title = event.get('title', event.get('summary', '')).casefold()
@@ -36,7 +39,7 @@ def event_category(event):
 
 
 def calendar_group(event):
-    return 'classes' if event_category(event) == 'class' else 'assessments'
+    return {'class':'classes','event':'events'}.get(event_category(event), 'assessments')
 
 
 def calendar_url(calendar_id):
@@ -56,7 +59,10 @@ def private_write(path, value):
 def identity(event):
     if event.get('source_uid'):
         return str(event['course_id'])+'|moodle:'+event['source_uid']
-    return str(event['course_id']) + '|' + event['title'].strip().casefold()
+    key = str(event['course_id']) + '|' + event['title'].strip().casefold()
+    if event['title'].strip().casefold() in ('in-class test', 'quiz') and event.get('date'):
+        key += '|' + event['date']
+    return key
 
 
 def preview(events, today=None):
@@ -79,8 +85,8 @@ def preview(events, today=None):
             reason = 'No definite date'
         elif day < today:
             reason = 'Past date'
-        elif not '2026-09-01' <= day.isoformat() <= '2026-12-31':
-            reason = 'Outside Fall 2026'
+        elif not semester.contains(day.isoformat()):
+            reason = 'Outside '+semester.current()['label']
         elif event.get('review') or event.get('tentative') or event.get('source_changed') or event.get('conflict_dates'):
             reason = 'Date or source needs checking'
         elif counts[identity(event)] > 1:
@@ -97,9 +103,11 @@ def preview(events, today=None):
 def event_body(event):
     day = date.fromisoformat(event['date'])
     is_class = event.get('source_type') == 'class_schedule'
-    timed = event.get('start_at') and event.get('source_type') in ('moodle_calendar', 'class_schedule')
+    timed = event.get('start_at') and event.get('source_type') in ('moodle_calendar', 'class_schedule', 'discovery', 'ai_review', 'class_time_assessment')
     description = ['Coursewell', 'Exact time from Moodle calendar (America/Halifax).' if timed else 'Date only — exact deadline time has not been verified.',
                    'Confirmed by you.' if event.get('confirmed_by_user') else 'Extracted from saved course materials. Check the source for instructions.']
+    if event.get('ai_reviewed'):
+        description.append('✦ AI second review — supporting excerpt below.')
     if is_class:
         if not event.get('end_at'):
             raise CalendarError('Class end time has not been confirmed.')
@@ -123,6 +131,14 @@ def event_body(event):
         body.update(start={'dateTime': start.isoformat(), 'timeZone': 'America/Halifax'},
                     end={'dateTime': end.isoformat(), 'timeZone': 'America/Halifax'},
                     reminders={'useDefault': False, 'overrides': [{'method': 'popup', 'minutes': 1440}, {'method': 'popup', 'minutes': 60}]})
+    if event.get('source_type') == 'ai_review':
+        body['description']=body['description'].replace('Exact time from Moodle calendar (America/Halifax).','Time interpreted from quoted source evidence (America/Halifax).')
+    if event.get('source_type') == 'discovery':
+        body['description'] = body['description'].replace('Exact time from Moodle calendar (America/Halifax).', 'Time reviewed by you from a source proposal (America/Halifax).')
+        body['location'] = event.get('location', '')
+    if event.get('source_type') == 'class_time_assessment':
+        body['description'] = body['description'].replace('Exact time from Moodle calendar (America/Halifax).', event['time_note'])
+        body['location'] = event.get('location', '')
     if is_class:
         body["location"] = event.get("location", "")
         body["reminders"] = {"useDefault": False, "overrides": [{"method":"popup", "minutes":15}]}
@@ -260,6 +276,15 @@ class CalendarService:
     def api(self, method, path, body=None, etag=None):
         # Calendar creation cannot be safely retried after an unknown outcome.
         # Event inserts have deterministic IDs; GET/PATCH/DELETE are retry-safe.
+        # Google PATCH merges nested fields: clear the opposite representation
+        # when converting an all-day event to a timed event (or back).
+        if method == 'PATCH' and body and '/events/' in path:
+            body = deepcopy(body)
+            for field in ('start','end'):
+                if body.get(field, {}).get('dateTime'):
+                    body[field]['date'] = None
+                elif body.get(field, {}).get('date'):
+                    body[field].update(dateTime=None, timeZone=None)
         attempts = 1 if method == 'POST' and path == 'calendars' else 3
         for attempt in range(attempts):
             headers = {'Authorization': 'Bearer '+self.access_token()}
@@ -314,6 +339,38 @@ class CalendarService:
             self.state.update(enabled=False, message='Disconnected locally. Existing Google events are preserved. You can also revoke access in your Google account.')
             self.save()
 
+    def add_reviewed(self, event):
+        """Idempotent explicit Add, serialized with normal sync across processes."""
+        with self.lock:
+            if self.busy:
+                raise CalendarError('Calendar is syncing. Try Add again when it finishes.')
+            with (self.root/'sync.lock').open('a') as lockfile:
+                try:
+                    fcntl.flock(lockfile, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise CalendarError('Another calendar sync is running.')
+                self.state = self.read('state.json', self.state)
+                self.tokens = self.read('tokens.json', self.tokens)
+                self.access_token()
+                ids = self.ensure_calendars()
+                cid = ids[calendar_group(event)]
+                body = event_body(event)
+                # Same title/time from two sources must not create two events.
+                stable = json.dumps([event['course_id'], event['title'].casefold().strip(), body['start'], body['end']], sort_keys=True)
+                # Google permits base32hex characters only (a-v and 0-9).
+                eid = 'ce' + hashlib.sha256(stable.encode()).hexdigest()
+                path = self.events_base(cid)
+                code, remote = self.api('GET', path+eid)
+                if code in (404,410):
+                    code, remote = self.api('POST', path.rstrip('/'), dict(body,id=eid))
+                    if code == 409:
+                        code, remote = self.api('GET', path+eid)
+                if code not in (200,201) or remote.get('status') == 'cancelled':
+                    raise CalendarError('Google did not confirm this event. Retry after checking Calendar.')
+                if managed_body(remote) != managed_body(body):
+                    raise CalendarError('An existing Google event differs. Check it before retrying.')
+                return {'id':eid,'calendar_id':cid}
+
     def start(self):
         with self.lock:
             if not self.state.get('enabled'):
@@ -349,9 +406,10 @@ class CalendarService:
                         source_failed = True
                 events = self.feed_provider()['events']
                 if source_failed:
-                    # Verified local timetable is independent of Moodle's live export.
-                    # Never write assessment dates from an unsuccessful refresh.
-                    events = [e for e in events if e.get('source_type') == 'class_schedule']
+                    # Verified local timetable and source-backed in-class assessments
+                    # are independent of the live Moodle calendar export.
+                    # Never reuse structured deadlines from a failed refresh.
+                    events = [e for e in events if e.get('source_type') in ('class_schedule','class_time_assessment','ai_review')]
                     if not events:
                         raise CalendarError('Moodle calendar could not refresh. No Google dates were changed. Click Update Moodle to reconnect and retry.')
                 self.sync(events)
@@ -391,7 +449,7 @@ class CalendarService:
                 try:
                     code, calendar = self.api('POST', 'calendars', {
                         'summary': name, 'timeZone': 'America/Halifax',
-                        'description': 'Fall 2026 ' + group + ' managed by Coursewell.'})
+                        'description': 'Coursewell ' + group + ' managed by Coursewell.'})
                 except GoogleError as exc:
                     if exc.status < 500:
                         pending[group] = False
@@ -485,7 +543,7 @@ class CalendarService:
             origin = record.get('calendar_id', self.state['calendar_id'])
             if origin != destination:
                 self.migrate_record(record, origin, destination, warnings)
-        cancelled = [e for e in events if e.get('cancelled') and e.get('source_type') == 'moodle_calendar' and not e.get('review')]
+        cancelled = [e for e in events if e.get('cancelled') and e.get('source_type') in ('moodle_calendar','ai_review') and not e.get('review')]
         for event in cancelled:
             key = identity(event)
             record = records.get(key)
@@ -512,7 +570,11 @@ class CalendarService:
             # Upgrade a uniquely named document event to its Moodle UID without
             # creating a second Google event when a structured deadline appears.
             same_name = [e for e in plan['ready'] if str(e['course_id']) == str(event['course_id']) and e['title'].casefold() == event['title'].casefold()]
-            if event.get('source_uid') and key not in records and legacy_key in records and len(same_name) == 1:
+            legacy = records.get(legacy_key, {}).get('body', {}).get('start', {})
+            legacy_day = legacy.get('date') or legacy.get('dateTime', '')[:10]
+            matching_day = [e for e in same_name if e.get('date') == event.get('date')]
+            migrate_generic = event['title'].casefold() in ('in-class test','quiz') and legacy_day == event.get('date') and len(matching_day) == 1
+            if key != legacy_key and key not in records and legacy_key in records and ((event.get('source_uid') and len(same_name) == 1) or migrate_generic):
                 records[key] = records.pop(legacy_key)
                 self.save()
             record = records.get(key)

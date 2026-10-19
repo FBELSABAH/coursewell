@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refresh all Fall 2026 courses and publish easy-to-copy folders."""
+"""Refresh the selected semester’s courses and publish easy-to-copy folders."""
 import argparse
 import fcntl
 import json
@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.config import PROJECT_ROOT, settings
+sys.path.insert(0,str(PROJECT_ROOT/'dashboard'))
+import semester
 from src.course_library import CourseLibrary, LoginRequired, atomic_write, authenticated_html, now, session_from_state
 from src.course_export import publish
 from src.moodle_browser import _resolve_storage_state_path
@@ -77,11 +79,11 @@ def main():
                 state, _ = browser_login_and_courses()
                 session = session_from_state(state, settings.moodle_home_url)
                 courses = enrolled_courses(session)
-            courses = sorted([c for c in courses if term_match(c.name, 'F2026')], key=lambda c: c.name)
+            courses = sorted([c for c in courses if semester.term_from_name(c.name)==semester.current()['term']], key=lambda c: c.name)
             if not courses:
-                raise RuntimeError('No Fall 2026 enrolled courses were found; existing folders were left untouched.')
+                raise RuntimeError('No '+semester.current()['label']+' enrolled courses were found; existing folders were left untouched.')
             destination = args.destination.resolve()
-            report = [f'University Courses update - {now()}', '', f'Fall 2026 courses found: {len(courses)}', '']
+            report = [f'University Courses update - {now()}', '', f"{semester.current()['label']} courses found: {len(courses)}", '']
             failed = False
             for course in courses:
                 print(f'Updating {course.name} ...', flush=True)
@@ -89,7 +91,7 @@ def main():
                     library = CourseLibrary(session, course.url, PROJECT_ROOT / 'data' / 'library')
                     run = library.sync()
                     library.manifest['course_name'] = course.name
-                    folder, counts = publish(library, destination, 'Fall 2026', state_root)
+                    folder, counts = publish(library, destination, semester.current()['label'], state_root)
                     line = f'{course.name}: {run["files_verified"]} files verified; {counts}'
                     print(line, flush=True)
                     report += [line, f'Folder: {folder}', f'Sync status: {run["status"]}']

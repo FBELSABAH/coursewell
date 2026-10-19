@@ -52,11 +52,45 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual([e['title'] for e in plan['ready']],['Midterm'])
         self.assertEqual(len(plan['held']),7)
 
+    def test_google_patch_clears_opposite_time_representation(self):
+        from unittest.mock import Mock
+        service=CalendarService(Path(self.tmp.name)/'patch',lambda:{'events':[]})
+        response=Mock(status_code=200,content=b'{}');response.json.return_value={}
+        service.http.request=Mock(return_value=response)
+        with patch.object(service,'access_token',return_value='test'):
+            body={'start':{'dateTime':'2026-10-20T14:30:00-03:00'},'end':{'dateTime':'2026-10-20T15:45:00-03:00'}}
+            service.api('PATCH','calendars/test/events/id',body)
+            sent=service.http.request.call_args.kwargs['json']
+            self.assertIsNone(sent['start']['date'])
+            self.assertNotIn('date',body['start'])
+            service.api('PATCH','calendars/test/events/id',{'start':{'date':'2026-10-20'},'end':{'date':'2026-10-21'}})
+            sent=service.http.request.call_args.kwargs['json']
+            self.assertIsNone(sent['start']['dateTime'])
+            self.assertIsNone(sent['end']['timeZone'])
+
+    def test_legacy_generic_identity_migrates_without_duplicate(self):
+        first=assessment(title='In-class test')
+        self.service.sync([first])
+        key=identity(first)
+        record=self.service.state['records'].pop(key)
+        self.service.state['records']['1|in-class test']=record
+        self.service.sync([first,assessment(title='In-class test',date='2026-10-22')])
+        self.assertEqual(len(self.remote),2)
+        self.assertEqual(self.service.state['records'][key]['event_id'],record['event_id'])
+        self.assertNotIn('1|in-class test',self.service.state['records'])
+
+    def test_export_failure_still_syncs_verified_local_class_assessments(self):
+        self.service.refresh_source=lambda:{'status':'error'}
+        self.service.feed_provider=lambda:{'events':[assessment(source_type='class_time_assessment'),assessment(title='Stale export',source_type='moodle_calendar')]}
+        with patch.object(self.service,'access_token',return_value='test'), patch.object(self.service,'sync') as sync:
+            self.service._run()
+        self.assertEqual([e['title'] for e in sync.call_args.args[0]],['Midterm'])
+
     def test_repeated_sync_and_restart_do_not_duplicate(self):
         self.service.sync([assessment()]);self.service.sync([assessment()])
         restarted=CalendarService(Path(self.tmp.name), lambda:{'events':[]});restarted.api=self.api
         restarted.sync([assessment()])
-        self.assertEqual([w[0] for w in self.writes],['calendar','calendar','event'])
+        self.assertEqual([w[0] for w in self.writes],['calendar','calendar','calendar','event'])
 
     def test_date_change_updates_same_event(self):
         self.service.sync([assessment()]);self.service.sync([assessment(date='2026-10-25')])
@@ -195,6 +229,22 @@ class SplitCalendarTests(unittest.TestCase):
         self.today.stop()
         self.tmp.cleanup()
 
+    def test_suggested_add_uses_google_valid_id_and_is_idempotent(self):
+        self.service.access_token=lambda:'test-token'
+        e=assessment()
+        e.update(course_id='discover',course='University',title='Campus workshop',
+                 source_type='discovery',confirmed_by_user=True,location='Library')
+        original=self.service.api
+        def strict_api(method,path,body=None,etag=None):
+            if method=='POST' and '/events' in path:
+                self.assertRegex(body['id'],r'^[a-v0-9]{5,1024}$')
+            return original(method,path,body,etag)
+        self.service.api=strict_api
+        first=self.service.add_reviewed(e)
+        second=self.service.add_reviewed(e)
+        self.assertEqual(first,second)
+        self.assertEqual(len(self.remote),1)
+
     def api(self, method, path, body=None, etag=None):
         parts = path.split('/')
         if path == 'calendars':
@@ -248,7 +298,7 @@ class SplitCalendarTests(unittest.TestCase):
         self.assertEqual(eid, 'old-event')
         self.assertEqual(self.remote[(cid,eid)]['colorId'], '11')
         self.assertEqual(self.calendars['legacy']['summary'], 'Coursewell · Classes')
-        self.assertEqual(len(self.service.status()['calendars']), 2)
+        self.assertEqual(len(self.service.status()['calendars']), 3)
 
     def test_legacy_class_stays_and_gets_neutral_color(self):
         e=assessment(kind='Class', source_type='class_schedule', source_uid='class:1:2026-10-20',

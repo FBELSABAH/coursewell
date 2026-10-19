@@ -1,8 +1,10 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Coursewell · Your university</title><link rel="icon" type="image/png" href="/brand/coursewell-mark.png">
-<link rel="stylesheet" href="/ui.css"><script>try{const t=localStorage.getItem("academic-theme")||"light";document.documentElement.dataset.theme=t==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):t}catch(e){}</script></head><body><a class="skip-link" href="#content">Skip to content</a>
-<aside id="sidebar" aria-label="Main navigation"><div class="sidebar-head"><div class="brand"><img class="logo" src="/brand/coursewell-mark.png" alt="" width="42" height="28"><div>coursewell</div></div><button id="sidebarToggle" aria-label="Hide navigation" aria-expanded="true" aria-controls="sidebar" title="Toggle navigation"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button></div><div id="sidebarContents"><nav><button class="active" data-nav="overview"><span>▦</span>Overview</button><button data-nav="courses"><span>▤</span>My courses</button><button data-nav="calendar"><span>▦</span>Calendar</button><button data-nav="study"><span>✧</span>Study</button><button data-nav="library"><span>▱</span>File library</button></nav><div class="side-label">YOUR COURSES</div><div id="sideCourses"></div></div></aside>
-<button id="sidebarBackdrop" aria-label="Close navigation" tabindex="-1"></button><main><header class="app-header"><div class="breadcrumb"><span class="header-semester">Fall 2026 <span aria-hidden="true">/</span></span><b id="crumb">Overview</b></div><div class="header-actions"><button class="quiet-button" onclick="openSearch()" aria-label="Search courses and files (Command or Control K)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg><span class="search-caption">Search</span><kbd>⌘ K</kbd></button><select id="appearance" aria-label="Appearance" onchange="setAppearance(this.value)"><option value="light">Light</option><option value="dark">Dark</option><option value="system">System</option></select></div></header><div id="content" tabindex="-1"></div></main><dialog id="dialog" aria-labelledby="dialogTitle"><h2 id="dialogTitle"></h2><div id="dialogBody"></div><button class="primary" onclick="document.getElementById('dialog').close()">Got it</button></dialog>
+<link rel="stylesheet" href="/ui.css"><script>
+function pageArt(page){return `<span class="page-art art-${page}" aria-hidden="true"></span>`}
+try{const t=localStorage.getItem("academic-theme")||"light";document.documentElement.dataset.theme=t==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):t}catch(e){}</script></head><body><a class="skip-link" href="#content">Skip to content</a>
+<aside id="sidebar" aria-label="Main navigation"><div class="sidebar-head"><div class="brand"><img class="logo" src="/brand/coursewell-mark.png" alt="" width="42" height="28"><div>coursewell</div></div><button id="sidebarToggle" aria-label="Hide navigation" aria-expanded="true" aria-controls="sidebar" title="Toggle navigation"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button></div><div id="sidebarContents"><nav><button class="active" data-nav="overview"><span>▦</span>Overview</button><button data-nav="courses"><span>▤</span>My courses</button><button data-nav="calendar"><span>▦</span>Calendar</button><button data-nav="study"><span>✧</span>Study</button><button data-nav="library"><span>▱</span>File library</button><button data-nav="settings"><span>⚙</span>Settings</button></nav><div class="side-label">YOUR COURSES</div><div id="sideCourses"></div></div></aside>
+<button id="sidebarBackdrop" aria-label="Close navigation" tabindex="-1"></button><main><header class="app-header"><div class="breadcrumb"><span class="header-semester"><span id="semesterLabel"></span> <span aria-hidden="true">/</span></span><b id="crumb">Overview</b></div><div class="header-actions"><button class="quiet-button" onclick="openSearch()" aria-label="Search courses and files (Command or Control K)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg><span class="search-caption">Search</span><kbd>⌘ K</kbd></button><select id="appearance" aria-label="Appearance" onchange="setAppearance(this.value)"><option value="light">Light</option><option value="dark">Dark</option><option value="system">System</option></select></div></header><div id="content" tabindex="-1"></div></main><dialog id="dialog" aria-labelledby="dialogTitle"><h2 id="dialogTitle"></h2><div id="dialogBody"></div><button class="primary" onclick="document.getElementById('dialog').close()">Got it</button></dialog>
 <script>
 const sidebar=document.getElementById('sidebar'),sidebarToggle=document.getElementById('sidebarToggle');
 function setSidebar(open,remember=true){
@@ -27,11 +29,11 @@ function fileRows(items){return items.length?items.map(({c,f})=>`<div class="fil
 function filterFiles(value){fileQuery=value;const query=value.toLowerCase();document.getElementById('fileResults').innerHTML=fileRows(allFiles().filter(({c,f})=>(c.code+' '+c.name+' '+f.name+' '+f.title).toLowerCase().includes(query)))}
 function allFiles(){return courses.flatMap(c=>c.files.map(f=>({c,f})))}
 function render(){document.querySelectorAll('[data-nav]').forEach(b=>b.classList.toggle('active',b.dataset.nav===view));let content='';const n=allFiles().length;
-if(view==='overview'){document.getElementById('crumb').textContent='Overview';content=`<div class="intro"><div><div class="eyebrow">${new Date().toLocaleDateString('en-CA',{timeZone:'America/Halifax',weekday:'long',month:'long',day:'numeric'})}</div><h1>Your overview</h1><p>Your coursework, in focus.</p></div><button class="primary" onclick="startUpdate(false)">Update Moodle</button></div><div class="status-strip"><button onclick="navigate('courses')"><strong>${courses.length}</strong> courses</button><span class="strip-divider"></span><button onclick="navigate('library')"><strong>${n}</strong> files</button><div class="sync-summary"><span class="status-dot" aria-hidden="true"></span><span id="updateStatus">Checking status…</span><small id="lastChecked"></small></div></div><section id="syncPanel" class="sync-panel" hidden></section><div class="workspace-columns"><div class="academic-stream"><section id="attentionPanel" class="workspace-section"><h2>Needs your attention</h2><p>Reading saved dates…</p></section><section id="assessmentsPanel" class="workspace-section"><h2>Upcoming dates</h2><p>Loading…</p></section></div><section id="changesPanel" class="workspace-section activity"></section></div><section class="workspace-section course-shortcuts"><div class="section-title"><h2>Your courses</h2><button class="textbutton" onclick="navigate('courses')">View all →</button></div>${courseCards()}</section>`}
+if(view==='overview'){document.getElementById('crumb').textContent='Overview';content=`<div class="intro"><div><div class="eyebrow">${new Date().toLocaleDateString('en-CA',{timeZone:'America/Halifax',weekday:'long',month:'long',day:'numeric'})}</div><h1>Your overview</h1><p>Your coursework, in focus.</p></div>${pageArt('overview')}<button class="primary" onclick="startUpdate(false)">Update Coursewell</button></div><div class="status-strip"><button onclick="navigate('courses')"><strong>${courses.length}</strong> courses</button><span class="strip-divider"></span><button onclick="navigate('library')"><strong>${n}</strong> files</button><div class="sync-summary"><span id="fetchResult"></span><span id="lastChecked">Checking status…</span></div></div><section id="syncPanel" class="sync-panel" hidden></section><div id="updateNotice" class="update-notice" role="status" hidden></div><div class="workspace-columns"><div class="academic-stream"><section id="assessmentsPanel" class="workspace-section"><h2>Upcoming dates</h2><p>Loading…</p></section></div><section id="changesPanel" class="workspace-section activity"></section></div>`}
 
-else if(view==='courses'){document.getElementById('crumb').textContent='My courses';content=`<div class="intro"><div><h1>Courses</h1></div></div>${courseCards()}`}
-else if(view==='course'){let c=courses.find(c=>c.id===selected);document.getElementById('crumb').textContent=c.code;content=`<div class="intro"><div><button class="textbutton back" onclick="navigate('courses')">← All courses</button><div class="eyebrow">${c.code} · FALL 2026</div><h1>${c.name}</h1><p>${c.files.length} downloaded files</p></div></div><div class="course-actions"><button class="primary" onclick="openCourseFolder('${c.id}',this)">Open course folder</button><a href="${esc(c.url)}" target="_blank" rel="noopener">Open course in Moodle ↗</a><span role="status" class="folder-feedback"></span></div><div class="card files"><h2>Course materials</h2>${fileRows(c.files.map(f=>({c,f})))}</div>`}
-else{document.getElementById('crumb').textContent='File library';const query=fileQuery.toLowerCase();content=`<div class="intro"><div><h1>Files</h1></div></div><input class="search library-search" type="search" aria-label="Search course files" placeholder="Search filenames or courses" value="${esc(fileQuery)}" oninput="filterFiles(this.value)"><div class="card" id="fileResults">${fileRows(allFiles().filter(({c,f})=>(c.code+' '+c.name+' '+f.name+' '+f.title).toLowerCase().includes(query)))}</div>`}
+else if(view==='courses'){document.getElementById('crumb').textContent='My courses';content=`<div class="intro"><div><h1>Courses</h1></div>${pageArt('courses')}</div>${courseCards()}`}
+else if(view==='course'){let c=courses.find(c=>c.id===selected);document.getElementById('crumb').textContent=c.code;content=`<div class="intro"><div><button class="textbutton back" onclick="navigate('courses')">← All courses</button><div class="eyebrow">${c.code} · ${esc(semesterState.label||'')}</div><h1>${c.name}</h1><p>${c.files.length} downloaded files</p></div></div><div class="course-actions"><button class="primary" onclick="openCourseFolder('${c.id}',this)">Open course folder</button><a href="${esc(c.url)}" target="_blank" rel="noopener">Open course in Moodle ↗</a><span role="status" class="folder-feedback"></span></div><div class="card files"><h2>Course materials</h2>${fileRows(c.files.map(f=>({c,f})))}</div>`}
+else{document.getElementById('crumb').textContent='File library';const query=fileQuery.toLowerCase();content=`<div class="intro"><div><h1>Files</h1></div>${pageArt('library')}</div><input class="search library-search" type="search" aria-label="Search course files" placeholder="Search filenames or courses" value="${esc(fileQuery)}" oninput="filterFiles(this.value)"><div class="card" id="fileResults">${fileRows(allFiles().filter(({c,f})=>(c.code+' '+c.name+' '+f.name+' '+f.title).toLowerCase().includes(query)))}</div>`}
 document.getElementById('content').innerHTML=content}
 function navigate(v){view=v;fileQuery='';render();animatePage();window.scrollTo(0,0)}function showCourse(id){selected=id;view='course';render();animatePage();window.scrollTo(0,0)}
 function animatePage(){
@@ -52,7 +54,8 @@ async function openCourseFolder(id,button){
  }catch(error){feedback.textContent=error.message}
  finally{button.disabled=false}
 }
-async function load(){let r=await fetch('/api/library');if(!r.ok)throw Error('Unable to read library');courses=await r.json();document.getElementById('sideCourses').innerHTML=courses.map(c=>`<button class="side-course ${c.color}" data-course="${c.id}" onclick="showCourse('${c.id}')"><span class="dot"></span>${c.code}</button>`).join('');render()}
+let semesterState={};
+async function load(){const termResponse=await fetch('/api/semester');if(termResponse.ok)semesterState=await termResponse.json();document.getElementById('semesterLabel').textContent=semesterState.label||''; let r=await fetch('/api/library');if(!r.ok)throw Error('Unable to read library');courses=await r.json();if(view==='course'&&!courses.some(c=>c.id===selected))view='courses';document.getElementById('sideCourses').innerHTML=courses.map(c=>`<button class="side-course ${c.color}" data-course="${c.id}" onclick="showCourse('${c.id}')"><span class="dot"></span>${c.code}</button>`).join('');render()}
 document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>navigate(b.dataset.nav));load().catch(()=>{document.getElementById('content').innerHTML='<div class="empty">Could not load your saved library. Reopen Coursewell to try again.</div>'});
 </script>
 
@@ -61,28 +64,42 @@ let syncState={status:'idle'},dashboardToken='',polling=false;
 const originalRender=render;
 const dateLabel=s=>s?new Date(s).toLocaleString('en-CA',{timeZone:'America/Halifax',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'Not yet checked';
 render=function(){originalRender();decorate()};
+function relativeTime(value){
+ const elapsed=Math.max(0,Date.now()-new Date(value).getTime());
+ if(!Number.isFinite(elapsed))return 'unknown';
+ const minutes=Math.floor(elapsed/60000);if(minutes<1)return 'just now';
+ const formatter=new Intl.RelativeTimeFormat('en',{numeric:'always'});
+ return minutes<60?formatter.format(-minutes,'minute'):minutes<1440?formatter.format(-Math.floor(minutes/60),'hour'):formatter.format(-Math.floor(minutes/1440),'day');
+}
+let completionUntil=0;
 function decorate(){
  if(view!=='overview')return;
- const active=['running','connecting','busy'].includes(syncState.status);
- const failed=['partial','login_required','error','interrupted'].includes(syncState.status);
- const intro=document.querySelector('.intro .primary');if(intro){intro.textContent=active?'Updating…':'Update Moodle';intro.disabled=active}
- const checked=document.getElementById('lastChecked');if(checked)checked.textContent=active?'Checking Moodle…':syncState.finished_at?`${failed?'Last attempt':'Last checked'} ${dateLabel(syncState.finished_at)}`:'Not checked yet';
- const updateLabel=document.getElementById('updateStatus');if(updateLabel)updateLabel.textContent=active?'Updating…':failed?'Needs attention':syncState.status==='complete'?'Last update succeeded':'Ready to update';
+ const active=['running','connecting','busy'].includes(syncState.status)||syncState.ai_busy;
+ const fetchState=syncState.sources?.moodle||syncState;
+ const lastFetch=fetchState.last_fetch||(['complete','partial'].includes(fetchState.status)?fetchState:{});
+ const intro=document.querySelector('.intro .primary');if(intro){intro.textContent=active?'Updating…':'Update Coursewell';intro.disabled=active}
+ const checked=document.getElementById('lastChecked');if(checked){checked.textContent=lastFetch.finished_at?'Last fetch · '+relativeTime(lastFetch.finished_at):'Not fetched yet';checked.title=lastFetch.finished_at?dateLabel(lastFetch.finished_at):''}
+ const result=document.getElementById('fetchResult');if(result){const verified=(lastFetch.courses||[]).reduce((n,c)=>n+(Number(c.verified)||0),0),changes=(lastFetch.changes||[]).filter(c=>!/^announcement:/i.test(c.name)&&/\.[a-z0-9]{2,5}$/i.test(c.name));result.textContent=lastFetch.finished_at&&verified?`${verified} files checked · ${changes.length} new or updated`:''}
  const panel=document.getElementById('syncPanel');if(!panel)return;
- panel.hidden=!active&&!failed;
- if(active){
-  delete panel.dataset.failure;
-  if(!panel.querySelector('.sync-track'))panel.innerHTML='<p role="status"></p><div class="sync-track" role="progressbar" aria-label="Moodle course update"><span></span></div>';
-  panel.querySelector('p').textContent=syncState.message||'Checking courses…';
-  const track=panel.querySelector('.sync-track');
-  const total=Number(syncState.total)||0,done=Math.min(total,Math.max(0,Number(syncState.completed)||0));
-  track.classList.toggle('indeterminate',!total);
-  if(total){track.setAttribute('aria-valuemin','0');track.setAttribute('aria-valuemax',total);track.setAttribute('aria-valuenow',done);track.setAttribute('aria-valuetext',`${done} of ${total} courses checked`);track.firstElementChild.style.transform=`scaleX(${done/total})`}
-  else{['aria-valuemin','aria-valuemax','aria-valuenow','aria-valuetext'].forEach(name=>track.removeAttribute(name));track.firstElementChild.style.transform=''}
- }else if(failed){
-  const signature=JSON.stringify(syncState);
-  if(panel.dataset.failure!==signature){panel.dataset.failure=signature;panel.innerHTML=`<p role="status">${esc(syncState.message||'Update needs attention')}</p><button class="textbutton" onclick="startUpdate(${syncState.status==='login_required'})">${syncState.status==='login_required'?'Sign in to Moodle':'Retry update'}</button><details><summary>Update details</summary><ul>${(syncState.courses||[]).map(c=>`<li>${esc(c.name)} · ${esc(c.status)}</li>`).join('')}</ul></details>`}
- }else{panel.replaceChildren();delete panel.dataset.failure}
+ panel.hidden=!active&&!(syncState.status==='complete'&&Date.now()<completionUntil);
+ if(active||syncState.status==='complete'){
+  if(!panel.querySelector('.sync-track'))panel.innerHTML='<div class="update-stage"><p role="status"></p><small></small></div><div class="sync-track determinate" role="progressbar" aria-label="Overall update progress" aria-valuemin="0" aria-valuemax="100"><span></span></div>';
+  const phase=syncState.ai_busy?'reviewing':syncState.phase||'fetching';
+  const labels={fetching:'Fetching Moodle & Outlook…',reading:'Reading saved sources…',reviewing:'Reviewing unclear sources with AI…',calendar:'Syncing Google Calendar…'};
+  panel.querySelector('p').textContent=active?(labels[phase]||'Updating…'):'Update complete';
+  const progress=Math.max(0,Math.min(100,Number(syncState.progress)||0));
+  const track=panel.querySelector('.sync-track');track.setAttribute('aria-valuenow',progress);track.setAttribute('aria-valuetext',active?`${progress}% · ${labels[phase]||'Updating'}`:'Complete');track.querySelector('span').style.transform=`scaleX(${progress/100})`;
+  panel.querySelector('small').textContent=!active?'Fetching, review and calendar sync finished':phase==='fetching'?(syncState.total?`${syncState.completed||0} of ${syncState.total} courses checked`:'Connecting to sources'):'Fetching finished · Your saved files are ready';
+ }
+ const notice=document.getElementById('updateNotice');if(notice){
+  const errors=['error','login_required','interrupted','partial'].includes(fetchState.status);
+  const remaining=Number(syncState.ai_remaining)||0;
+  let message='';
+  if(!active&&errors)message=`<span>${esc(fetchState.message||'Fetching did not finish.')}</span><button class="textbutton" onclick="startUpdate(${fetchState.status==='login_required'})">${fetchState.status==='login_required'?'Sign in':'Retry fetch'}</button>`;
+  else if(!active&&remaining)message=`<span>${remaining} ${remaining===1?'source is':'sources are'} waiting for AI review.</span><a href="#settings" onclick="event.preventDefault();navigate('settings')">Review settings →</a>`;
+  else if(!active&&['error','partial'].includes(syncState.status))message=`<span>${esc(syncState.message||'Update did not finish.')}</span><a href="#settings" onclick="event.preventDefault();navigate('settings')">Check settings →</a>`;
+  notice.hidden=!message;notice.innerHTML=message;
+ }
 
  const changes=document.getElementById('changesPanel');if(!changes)return;
  const history=(syncState.change_history||syncState.changes||[]).slice().reverse();
@@ -90,18 +107,18 @@ function decorate(){
  const signature=JSON.stringify([history,syncState.status,syncState.changes?.length]);
  if(changes.dataset.signature!==signature){changes.dataset.signature=signature;changes.innerHTML='<div class="section-title"><h2>Recent activity</h2></div>'+(!active&&syncState.status==='complete'&&!syncState.changes?.length?'<p class="change-note">No new changes in the last check.</p>':'')+(history.length?history.slice(0,5).map(row).join('')+(history.length>5?`<details class="coverage"><summary>Earlier changes (${history.length-5})</summary>${history.slice(5).map(row).join('')}</details>`:''):'<p>No changes yet.</p>')}
 }
-async function status(){if(polling)return;polling=true;try{const r=await fetch('/api/status');if(!r.ok)throw Error('status');const next=await r.json();const finished=['running','connecting'].includes(syncState.status)&&!['running','connecting'].includes(next.status);syncState=next;dashboardToken=next.token;decorate();if(finished)await load()}catch(e){const p=document.getElementById('syncPanel');if(p){p.hidden=false;p.innerHTML='<h2>Dashboard disconnected</h2><p>Reopen Coursewell using its launcher, then reload this page. Saved files are safe.</p>'}}finally{polling=false}}
+async function status(){if(polling)return;polling=true;try{const r=await fetch('/api/status');if(!r.ok)throw Error('status');const next=await r.json();const finished=['running','connecting'].includes(syncState.status)&&!['running','connecting'].includes(next.status);if(finished&&next.status==='complete'){completionUntil=Date.now()+2500;setTimeout(decorate,2600)}syncState=next;dashboardToken=next.token;decorate();if(finished)await load()}catch(e){const p=document.getElementById('syncPanel');if(p){p.hidden=false;p.innerHTML='<h2>Dashboard disconnected</h2><p>Reopen Coursewell using its launcher, then reload this page. Saved files are safe.</p>'}}finally{polling=false}}
 async function startUpdate(reconnect){try{if(!dashboardToken)await status();const r=await fetch(reconnect?'/api/reconnect':'/api/sync',{method:'POST',headers:{'X-Dashboard-Token':dashboardToken}});if(![202,409].includes(r.status))throw Error('start');syncState=await r.json();decorate()}catch(e){modal('Could not start update','<p>Reload this page and try again. If it still cannot connect, reopen the app using its launcher.</p>')}}
 status();setInterval(status,2000);
 </script>
 
 <script>
 function paintAssessments(){}
-let assessmentData=null,assessmentFilter='week',assessmentBusy=false,assessmentSync=null;
+let assessmentData=null,assessmentFilter='month',assessmentBusy=false,assessmentSync=null;
 const previousDecorate=decorate;
 decorate=function(){previousDecorate();paintAssessments()};
 
-function showAssessment(id){const e=assessmentData.events.find(e=>e.id===id);if(!e)return;modal(e.title,`<p><b>${esc(e.course)}</b><br>${e.date?esc(e.date):'No fixed date found'} · ${esc(e.kind)}</p>${e.conflict_dates?`<p>⚠ Other sources list ${esc(e.conflict_dates.join(', '))}. Verify with the instructor or Moodle before relying on this date.</p>`:''}${e.tentative?'<p>The source describes this schedule as tentative.</p>':''}<p>Submission: ${esc(e.submission_status)}. ${esc(e.time_note||'Times are not inferred from the class schedule.')}</p>${e.sources.map(s=>`<div class="evidence">${esc(s.evidence)}<br><a href="${esc(s.file_url)}${s.page&&s.name.toLowerCase().endsWith('.pdf')?'#page='+s.page:''}" target="_blank" rel="noopener">${esc(s.name)}${s.page?' · page/slide '+s.page:''} ↗</a> · <a href="${esc(s.url)}" target="_blank" rel="noopener">Moodle ↗</a></div>`).join('')}`)}
+function showAssessment(id){const e=assessmentData.events.find(e=>e.id===id);if(!e)return;if(e.proposal_id){openAcademicReviews();return;}modal(e.title,`<p><b>${esc(e.course)}</b><br>${e.date?esc(e.date):'No fixed date found'} · ${esc(e.kind)}</p>${e.conflict_dates?`<p>⚠ Other sources list ${esc(e.conflict_dates.join(', '))}. Verify with the instructor or Moodle before relying on this date.</p>`:''}${e.schedule_note?'<p>'+esc(e.schedule_note)+'</p>':''}${e.related_proposal_ids?.length?'<button class="textbutton" onclick="document.getElementById(\'dialog\').close();openAcademicReviews()">Review related interpretations →</button>':''}${e.tentative?'<p>The source describes this schedule as tentative.</p>':''}<p>Submission: ${esc(e.submission_status)}. ${esc(e.time_note||'Times are not inferred from the class schedule.')}</p>${(e.sources||[]).map(s=>`<div class="evidence">${esc(s.evidence)}<br><a href="${esc(s.file_url)}${s.page&&s.name.toLowerCase().endsWith('.pdf')?'#page='+s.page:''}" target="_blank" rel="noopener">${esc(s.name)}${s.page?' · page/slide '+s.page:''} ↗</a> · <a href="${esc(s.url)}" target="_blank" rel="noopener">Moodle ↗</a></div>`).join('')}`)}
 async function loadAssessments(){if(assessmentBusy)return;assessmentBusy=true;try{const r=await fetch('/api/assessments');if(!r.ok)throw Error('not available');assessmentData=await r.json()}catch(e){assessmentData={error:'Reopen Coursewell.app to load the new assessment feed. Your saved course files are unaffected.'}}finally{assessmentBusy=false;paintAssessments()}}
 loadAssessments();setInterval(()=>{if(!['running','connecting'].includes(syncState.status)&&syncState.finished_at!==assessmentSync){assessmentSync=syncState.finished_at;loadAssessments()}},3000);
 </script>
@@ -123,4 +140,4 @@ function updateSidebarSelection(){
 const renderBeforeSidebarSelection=render;
 render=function(){renderBeforeSidebarSelection();updateSidebarSelection()};
 updateSidebarSelection();
-</script><script src="/ui.js"></script></body></html>
+</script><script src="/ui.js"></script><script src="/discover.js"></script><script src="/settings.js"></script></body></html>

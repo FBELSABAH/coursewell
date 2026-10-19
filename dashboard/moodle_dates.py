@@ -1,3 +1,4 @@
+import semester
 """Read Moodle's own calendar using the existing session, without AI or feed tokens."""
 from datetime import date, datetime
 import json
@@ -26,7 +27,7 @@ def parse_calendar(content, courses):
             continue
         categories = entry.get('categories')
         category_text = ' '.join(str(x) for x in getattr(categories, 'cats', []))
-        matches = [c for c in courses if re.search(r'2026F\s+'+re.escape(c['code'].replace(' ', '-'))+r'(?:-|\b)', category_text, re.I)]
+        matches = [c for c in courses if semester.term_from_name(category_text)==semester.current()['term'] and re.search(r'\b'+re.escape(c['code']).replace(r'\ ',r'[ -]')+r'(?:-|\b)',category_text,re.I)]
         if len(matches) != 1:
             skipped += 1
             continue
@@ -116,9 +117,12 @@ def merge(document_feed, snapshot):
         return result
     direct = [dict(e) for e in snapshot.get('events', [])]
     docs = document_feed['events']
-    def key(e): return str(e['course_id']), e['title'].casefold()
+    def key(e):
+        title=e['title'].casefold()
+        return (str(e['course_id']), title, e.get('date') if title in ('in-class test','quiz') else None)
     direct_keys = {key(e) for e in direct}
     confirmed = {key(e) for e in docs if e.get('confirmed_by_user')}
+    confirmed_uids = {e['source_uid'] for e in docs if e.get('confirmed_by_user') and e.get('source_uid')}
     practice = {key(e) for e in docs if e.get('kind') == 'Practice'}
     practice_courses = {str(e['course_id']) for e in docs if e.get('kind') == 'Practice' and e.get('submission_status') == 'Not submitted by course policy'}
     for event in direct:
@@ -132,7 +136,7 @@ def merge(document_feed, snapshot):
             if key(doc) == key(event):
                 event['sources'] += doc.get('sources', [])
     result['events'] = [e for e in docs if key(e) not in direct_keys or key(e) in confirmed]
-    result['events'] += [e for e in direct if key(e) not in confirmed]
+    result['events'] += [e for e in direct if key(e) not in confirmed and e.get('source_uid') not in confirmed_uids]
     result['events'].sort(key=lambda e:(e.get('date') or '9999', e.get('course', ''), e['title']))
     result['calendar_checked_at'] = snapshot.get('checked_at')
     return result

@@ -164,7 +164,7 @@ class ChatGPTConnection:
         except (requests.RequestException, ValueError):
             raise StudyError('Could not load models. Check your internet connection.') from None
 
-    def complete(self, model, instructions, prompt):
+    def complete(self, model, instructions, prompt, usage_callback=None):
         if model not in {m['id'] for m in self.models()}:
             raise StudyError('Choose a model from your connected account.')
         try:
@@ -173,7 +173,11 @@ class ChatGPTConnection:
                                       'input': [{'role': 'user', 'content': prompt}],
                                       'store': False, 'stream': True}, stream=True, timeout=(15, 120)) as response:
                 if response.status_code != 200:
-                    raise StudyError('ChatGPT could not answer. Check your plan allowance and connection. No paid API fallback was used.')
+                    if response.status_code==429:
+                        raise StudyError('ChatGPT plan rate or usage limit reached. Saved reviews are retained; retry later. No paid API fallback was used.')
+                    if response.status_code in (401,403):
+                        raise StudyError('ChatGPT authorization was rejected. Reconnect your account. No paid API fallback was used.')
+                    raise StudyError(f'ChatGPT request failed (HTTP {response.status_code}). Saved reviews are retained; retry later. No paid API fallback was used.')
                 text = ''
                 for line in response.iter_lines():
                     if not line.startswith(b'data: '):
@@ -188,6 +192,8 @@ class ChatGPTConnection:
                         if len(text) > 100000:
                             raise StudyError('Answer exceeded the local display limit. Ask a narrower question.')
                     elif kind == 'response.completed':
+                        if usage_callback:
+                            usage_callback(event.get('response', {}).get('usage'))
                         return text
                     elif kind in ('response.failed', 'response.incomplete', 'error'):
                         raise StudyError('ChatGPT did not complete the answer. Check your plan allowance or retry later; no paid fallback was used.')

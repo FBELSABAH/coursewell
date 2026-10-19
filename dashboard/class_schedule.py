@@ -11,11 +11,12 @@ import hashlib
 import json
 
 
-def class_events(config_path, library_root):
-    path = Path(config_path)
-    if not path.exists():
-        return []
-    config = json.loads(path.read_text())
+def class_events(config_path, library_root, config=None):
+    if config is None:
+        path = Path(config_path)
+        if not path.exists():
+            return []
+        config = json.loads(path.read_text())
     start, end = date.fromisoformat(config['start']), date.fromisoformat(config['end'])
     if end < start or (end-start).days > 180:
         raise ValueError('Invalid class term bounds')
@@ -36,8 +37,8 @@ def class_events(config_path, library_root):
         sources = [{'name': source.name, 'url': row.get('source_url',''),
                     'file_url': '/file?'+urlencode({'course':row['course_id'],'path':row['path']}),
                     'evidence': row['evidence'], 'page': 1},
-                   {'name':'UPEI Fall 2026 academic calendar','url':config['calendar_source'],
-                    'evidence':'Classes September 8–December 9. No classes September 30, October 12–16, November 11. Verified '+config['verified_on']}]
+                   {'name':'University academic calendar','url':config['calendar_source'],
+                    'evidence':'Classes '+config['start']+'–'+config['end']+'. Excluded dates: '+', '.join(sorted(excluded))+'. Verified '+config['verified_on']}]
         if row.get('time_confirmed_by_user'):
             sources.append({'name':'Your timetable confirmation','evidence':row['time_confirmed_by_user']})
         day = start

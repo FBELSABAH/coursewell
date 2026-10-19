@@ -46,3 +46,34 @@ class ReaderTests(unittest.TestCase):
         self.assertIn('OCR failed',' '.join(r['notes']))
 
 if __name__=='__main__':unittest.main()
+
+class TableReaderTests(unittest.TestCase):
+    def test_docx_table_keeps_deadline_beside_assessment(self):
+        with tempfile.TemporaryDirectory() as root:
+            p=Path(root)/'schedule.docx'
+            with zipfile.ZipFile(p,'w') as z:
+                z.writestr('word/document.xml','<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Quiz 2</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>October 29, 2026</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>')
+            document=read_document(p,extract)
+            self.assertIn('Quiz 2 | October 29, 2026',document['pages'][0][1])
+            self.assertEqual(candidates(document['pages'][0][1],2026,'Schedule')[0]['date'],'2026-10-29')
+
+class ContainerReaderTests(unittest.TestCase):
+    def test_archive_paths_cannot_write_outside_temporary_directory(self):
+        with tempfile.TemporaryDirectory() as root:
+            p=Path(root)/'materials.zip'
+            with zipfile.ZipFile(p,'w') as z:
+                z.writestr('../../escaped.txt','Quiz 2 is scheduled for November 20, 2026. Bring your student ID.')
+                z.writestr('nested.zip',b'not executed')
+            result=read_document(p,extract)
+            self.assertIn('November 20',str(result['pages']))
+            self.assertTrue(any('nested archive' in note for note in result['notes']))
+            self.assertFalse((Path(root)/'escaped.txt').exists())
+    def test_email_body_and_attachment_are_both_read(self):
+        from email.message import EmailMessage
+        with tempfile.TemporaryDirectory() as root:
+            message=EmailMessage();message['Subject']='Quiz preparation';message.set_content('Please read the attached assessment schedule carefully before class.')
+            message.add_attachment(b'Quiz 2 is scheduled for November 20, 2026. Bring your student ID.',maintype='text',subtype='plain',filename='schedule.txt')
+            p=Path(root)/'email.eml';p.write_bytes(message.as_bytes())
+            result=read_document(p,extract)
+            self.assertIn('attached assessment',str(result['pages']))
+            self.assertIn('November 20',str(result['pages']))

@@ -1,3 +1,4 @@
+import semester
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -11,10 +12,16 @@ from chatgpt_connection import ChatGPTConnection, StudyError
 from study_ai import StudyAI
 from calendar_service import CalendarService, CalendarError, preview
 from assessments import feed
+from assessment_identity import reconcile
+from assessment_times import resolve_class_times
 from chat_service import ChatService
 from sync_service import SyncService
+from discovery_service import DiscoveryService
+from outlook_service import OutlookService
+from update_service import UpdateService
+from source_review import collect_library
 import moodle_dates
-from class_schedule import class_events
+import schedule_discovery
 
 SYNC = SyncService()
 TOKEN = secrets.token_urlsafe(32)
@@ -23,27 +30,38 @@ PORT = int(os.environ.get('ACADEMIC_DASHBOARD_PORT','8767'))
 ROOT = Path(__file__).parent
 CHAT = ChatService(ROOT/'.runtime'/'chat.sqlite')
 LIBRARY = Path('/Users/fbelsabah/Documents/academic-ai-assistant/data/library')
-COURSES = [('27355','CS 2520','Computer Organization & Architecture','Systems, circuits & computation','coral'),('27974','STAT 2910','Probability & Mathematical Statistics I','Probability, distributions & inference','blue'),('27973','STAT 2240','Applied Regression Analysis','Models, relationships & prediction','purple'),('27641','MATH 2420','Combinatorics I','Counting, proofs & graphs','gold'),('27151','AMS 1910','Introduction to Data Science','Data, exploration & discovery','green')]
+
 CALENDAR_ROOT = Path('/Users/fbelsabah/Documents/academic-ai-assistant/data/calendar')
 MOODLE_DATES = CALENDAR_ROOT/'moodle.json'
 STUDY_CONNECTION = ChatGPTConnection(ROOT/'.runtime'/'chatgpt', PORT)
 STUDY_AI = StudyAI(LIBRARY, ROOT/'.runtime'/'study-ai', STUDY_CONNECTION)
 
-def calendar_feed(include_classes=False):
+def base_feed(include_classes=False):
     documents = CHAT.overlay(feed(LIBRARY, ROOT/'.runtime'))
     snapshot = json.loads(MOODLE_DATES.read_text()) if MOODLE_DATES.exists() else {}
     result = moodle_dates.merge(documents, snapshot)
+    result["events"] = reconcile([e for e in result["events"] if str(e.get("course_id")) in semester.COURSES])
     if include_classes:
-        result["events"] += class_events(CALENDAR_ROOT/"classes.json", LIBRARY)
+        result["events"] += [e for e in schedule_discovery.events(CALENDAR_ROOT, LIBRARY) if str(e.get("course_id")) in semester.COURSES and semester.contains(e.get("date"))]
     return result
 
-CALENDAR = CalendarService(CALENDAR_ROOT, lambda: calendar_feed(True), PORT,
+def calendar_feed(include_classes=False, include_optional=True):
+    result=base_feed(include_classes)
+    result['events']=DISCOVERY.overlay(result['events'])
+    if include_optional:result['events']+=DISCOVERY.calendar_events()
+    result['events']=resolve_class_times(reconcile(result['events']), schedule_discovery.events(CALENDAR_ROOT, LIBRARY))
+    return result
+
+CALENDAR = CalendarService(CALENDAR_ROOT, lambda: calendar_feed(True, False), PORT,
     refresh_source=lambda: moodle_dates.refresh(MOODLE_DATES, library()))
-SYNC.on_complete = CALENDAR.start
+DISCOVERY = DiscoveryService(ROOT/'.runtime'/'discovery', STUDY_CONNECTION, lambda:base_feed()['events'])
+DISCOVERY.on_review_complete = CALENDAR.start
+OUTLOOK = OutlookService(ROOT/'.runtime'/'outlook', DISCOVERY)
+UPDATES = UpdateService(SYNC, OUTLOOK, DISCOVERY, CALENDAR, LIBRARY, lambda:schedule_discovery.refresh(LIBRARY,CALENDAR_ROOT))
 
 def library():
     result=[]
-    for cid,code,name,description,color in COURSES:
+    for cid,code,name,description,color in semester.catalog(LIBRARY):
         path=LIBRARY / ('course-'+cid) / 'manifest.json'
         manifest=json.loads(path.read_text()) if path.exists() else {}
         files=[]
@@ -68,12 +86,44 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.trusted() or self.headers.get('Origin') not in (f'http://127.0.0.1:{PORT}',f'http://localhost:{PORT}') or not secrets.compare_digest(self.headers.get('X-Dashboard-Token',''), TOKEN):
             self.send_error(403); return
+        if self.path=='/api/semester':
+            try:
+                if UPDATES.lock.locked() or DISCOVERY.review_lock.locked() or CALENDAR.status().get('busy') or STUDY_AI.lock.locked():
+                    self.json_response({'error':'Wait for the current update or review to finish.'},409);return
+                size=int(self.headers.get('Content-Length','0'))
+                if not 0<size<=1000:raise ValueError('Invalid settings request.')
+                body=json.loads(self.rfile.read(size))
+                saved=semester.save(body.get('term'))
+                UPDATES.state={'status':'idle','sources':{},'message':''}
+                self.json_response(saved)
+            except (ValueError,TypeError,AttributeError):self.json_response({'error':'Choose Auto or a semester such as W2027.'},400)
+            return
+        if self.path.startswith('/api/discover/'):
+            try:
+                size=int(self.headers.get('Content-Length','0'))
+                if not 0<=size<=20000:
+                    self.send_error(413);return
+                body=json.loads(self.rfile.read(size) or b'{}')
+                if not isinstance(body,dict):raise ValueError('Invalid request.')
+                action=self.path.rsplit('/',1)[-1]
+                if action=='connect-outlook': result={'started':OUTLOOK.start(True)}
+                elif action=='check-outlook': result={'started':OUTLOOK.start()}
+                elif action=='review': result=DISCOVERY.start_review(body.get('model'))
+                elif action=='confirm': result=DISCOVERY.confirm_academic(body.get('id'),body.get('course_id'),body.get('target_id'),body.get('date'))
+                elif action=='collect': result=collect_library(LIBRARY,DISCOVERY)
+                elif action=='settings': result=DISCOVERY.settings(body)
+                elif action in ('add','skip'): result=DISCOVERY.decide(body.get('id'),action,CALENDAR)
+                else:self.send_error(404);return
+                self.json_response(result)
+            except (ValueError,StudyError,CalendarError) as exc:self.json_response({'error':str(exc)},400)
+            except Exception:self.json_response({'error':'Could not finish. Saved sources and decisions are retained.'},500)
+            return
         if self.path.startswith('/api/course-folder/'):
             try:
                 cid = self.path.rsplit('/', 1)[-1]
-                if cid not in {course[0] for course in COURSES}:
+                if cid not in {course[0] for course in semester.catalog(LIBRARY)}:
                     raise ValueError('Unknown course.')
-                open_course_folder(cid, LIBRARY.parent/'course-export-state', Path.home()/'Documents'/'University Courses'/'Fall 2026')
+                open_course_folder(cid, LIBRARY.parent/'course-export-state', Path.home()/'Documents'/'University Courses'/semester.current()['label'])
                 self.json_response({'opened': True})
             except (ValueError, OSError) as exc:
                 self.json_response({'error': str(exc)}, 400)
@@ -118,8 +168,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path not in ('/api/sync', '/api/reconnect'):
             self.send_error(404); return
-        started=SYNC.start(reconnect=self.path=='/api/reconnect')
-        self.json_response(SYNC.snapshot(), 202 if started else 409)
+        started=UPDATES.start(reconnect=self.path=='/api/reconnect')
+        self.json_response(UPDATES.snapshot(), 202 if started else 409)
 
     def do_GET(self):
         if not self.trusted():
@@ -128,13 +178,13 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == '/oauth/chatgpt/callback':
             try:
                 STUDY_CONNECTION.callback(parse_qs(u.query))
-                message = 'ChatGPT connected. Return to Study and choose a model to test your course materials.'
+                message = 'ChatGPT connected. Return to Discover and choose your review model.'
                 code = 200
             except StudyError as exc:
                 message, code = str(exc), 400
             except Exception:
-                message, code = 'ChatGPT sign-in could not finish. Try again from Study.', 500
-            payload = ('<!doctype html><meta charset="utf-8"><title>Coursewell</title><h1>ChatGPT connection</h1><p>'+html.escape(message)+'</p><a href="/#study">Return to Study</a>').encode()
+                message, code = 'ChatGPT sign-in could not finish. Try again from Discover.', 500
+            payload = ('<!doctype html><meta charset="utf-8"><title>Coursewell</title><h1>ChatGPT connection</h1><p>'+html.escape(message)+'</p><a href="/#discover">Return to AI review</a>').encode()
             self.send_response(code); self.send_header('Content-Type','text/html; charset=utf-8'); self.send_header('Cache-Control','no-store'); self.send_header('Referrer-Policy','no-referrer'); self.end_headers(); self.wfile.write(payload); return
         if u.path.startswith('/api/study/'):
             try:
@@ -160,19 +210,25 @@ class Handler(BaseHTTPRequestHandler):
                 message='Sign-in could not finish. Return to the dashboard and try again.';code=500
             payload=('<!doctype html><meta charset="utf-8"><title>Coursewell</title><h1>Google Calendar</h1><p>'+html.escape(message)+'</p><a href="/">Return to dashboard</a>').encode()
             self.send_response(code);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Cache-Control','no-store');self.send_header('Referrer-Policy','no-referrer');self.end_headers();self.wfile.write(payload);return
+        if u.path=='/api/discover':
+            self.json_response(dict(DISCOVERY.snapshot(),outlook=OUTLOOK.status(),targets=[{k:e.get(k) for k in ('id','course_id','title','date')} for e in base_feed()['events']]));return
         if u.path=='/api/calendar':
             self.json_response(CALENDAR.status()); return
         if u.path=='/api/calendar/preview':
             try:
-                self.json_response(preview(calendar_feed(True)['events']))
+                self.json_response(dict(preview(calendar_feed(True)['events']),schedule=schedule_discovery.report(CALENDAR_ROOT)))
             except Exception:
                 self.json_response({'error':'Could not prepare assessment preview. Try again after updating Moodle.'},500)
             return
+        if u.path=='/api/semester':
+            self.json_response(semester.current()); return
         if u.path=='/api/status':
-            self.json_response(dict(SYNC.snapshot(), token=TOKEN, app='academic-assistant', version=21)); return
+            self.json_response(dict(UPDATES.snapshot(), token=TOKEN, app='academic-assistant', version=48)); return
         if u.path=='/api/assessments':
             try:
-                self.json_response(calendar_feed())
+                result=calendar_feed()
+                result['events']=[e for e in reconcile(result['events']+DISCOVERY.pending_events()) if not e.get('proposal_id')]
+                self.json_response(result)
             except Exception:
                 self.json_response({'error':'Assessment extraction could not complete. Saved files are safe.'},500)
             return
@@ -196,7 +252,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(403); return
         elif u.path in ('/','/index.html'):
             path=ROOT/'index.html'
-        elif u.path in ('/calendar.js', '/study_ai.js', '/study_ai.css', '/ui.css', '/ui.js', '/brand/coursewell-mark.png'):
+        elif u.path in ('/settings.js', '/calendar.js', '/discover.js', '/study_ai.js', '/study_ai.css', '/ui.css', '/ui.js', '/brand/coursewell-mark.png', '/brand/coursewell-watercolors.png'):
             path=ROOT/u.path.lstrip('/')
         else:
             self.send_error(404); return

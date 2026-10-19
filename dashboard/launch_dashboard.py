@@ -16,20 +16,20 @@ def ready():
     try:
         with urlopen(URL+'/api/status', timeout=1) as response:
             data=json.load(response)
-        return data.get('app') == 'academic-assistant' and data.get('version') == 21
+        return data.get('app') == 'academic-assistant' and data.get('version') == 48
     except Exception:
         return False
 
 
-def main():
+def main(open_browser=True):
     if not ready():
         # Replace only this app's idle older service, after verifying both the
         # API identity and its working directory. Never kill an active update.
         try:
             with urlopen(URL+'/api/status',timeout=1) as response:old=json.load(response)
-            if old.get('app')=='academic-assistant' and old.get('version',0)<21:
+            if old.get('app')=='academic-assistant' and old.get('version',0)<48:
                 if old.get('status') in ('running','connecting'):
-                    subprocess.run(['/usr/bin/open','-a','Google Chrome',URL],check=True)
+                    if open_browser:subprocess.run(['/usr/bin/open','-a','Google Chrome',URL],check=True)
                     return 0
                 pids=subprocess.check_output(['/usr/sbin/lsof','-t','-iTCP:8767','-sTCP:LISTEN'],text=True).split()
                 for pid in pids:
@@ -52,9 +52,9 @@ def main():
             return 1
     # Explicitly target regular Chrome; the system URL handler may point to
     # the separate testing browser used for Moodle authentication.
-    subprocess.run(['/usr/bin/open','-a','Google Chrome',URL],check=True)
+    if open_browser:subprocess.run(['/usr/bin/open','-a','Google Chrome',URL],check=True)
     return 0
 
 
 if __name__=='__main__':
-    sys.exit(main())
+    sys.exit(main(open_browser='--background' not in sys.argv))

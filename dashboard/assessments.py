@@ -1,3 +1,4 @@
+import semester
 """Conservative, cached extraction of source-backed assessment candidates.
 
 No model, credentials, or network access. Source dates remain local calendar dates;
@@ -15,8 +16,8 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urlencode
 from document_reader import read_document, SUPPORTED
 
-VERSION = 8
-READER_VERSION = 5
+VERSION = 9
+READER_VERSION = 'tables-v3'
 LOCK = threading.Lock()
 MONTHS = {m:i+1 for i,m in enumerate(['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'])}
 MON = r'(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sept?(?:ember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?'
@@ -84,6 +85,7 @@ def candidates(text, year, source_title, moodle=False):
     for i,line in enumerate(lines):
         if re.search(r'tentative.*(?:schedule|dates)',line,re.I):tentative=True
         if re.search(r'tests? (?:will occur|schedule)|^35%: Tests',line,re.I):heading='In-class test'
+        class_session = bool(re.search(r'^Class\s*#?\s*\d+\s*[-–—:]\s*', line, re.I))
         ds=dates(line,year)
         # Moodle's explicit Due label may be on its own line.
         is_due=moodle and (line.lower().startswith('due:') or (i>0 and lines[i-1].lower()=='due:'))
@@ -115,7 +117,7 @@ def candidates(text, year, source_title, moodle=False):
             if title=='Assessment date to check':continue
             for d in ds:
                 date_range=bool(re.search(r'\d\s*(?:–|—|-|to|through)\s*(?:'+MON+r'\s*)?\d',context,re.I))
-                rows.append({'title':title,'date':d,'evidence':evidence[:1000], 'tentative':tentative or bool(re.search('tentative',source_title,re.I)), 'review':len(ds)>1 or date_range or not d.startswith(str(year)), 'moodle_due':is_due})
+                rows.append({'title':title,'date':d,'evidence':evidence[:1000], 'class_time_reference':class_session or bool(re.search(r'in[- ]class|during (?:the )?class time|scheduled class', context, re.I)), 'class_session_confirmation':class_session and not re.search(r'tentative|possibly|provisional|maybe',line,re.I), 'tentative':(tentative and not class_session) or bool(re.search(r'tentative|possibly|provisional|maybe',line+' '+source_title,re.I)), 'review':len(ds)>1 or date_range or not d.startswith(str(year)), 'moodle_due':is_due})
         if re.search(r'(?:almost every class|announced later|date.*\b(?:TBA|TBD)\b|date will.*announced|deadline.*announced)',line,re.I):
             context=' '.join(lines[max(0,i-2):min(len(lines),i+2)])
             if ASSESS.search(context):
@@ -124,12 +126,19 @@ def candidates(text, year, source_title, moodle=False):
     return rows
 
 
+def announcement_is_explicit(candidate):
+    """A date mention alone does not confirm that an assessment is scheduled."""
+    text = candidate['evidence']
+    return bool(candidate.get('date') and re.search(
+        r"\b(?:will (?:be held|take place|have|write)|is scheduled|is on|due(?: on)?|held in class)\b", text, re.I))
+
+
 def build(library, runtime):
     """Rebuild from verified sources, reusing content-addressed extraction results."""
     runtime.mkdir(parents=True,exist_ok=True)
     cache_dir=runtime/'assessment-cache';cache_dir.mkdir(exist_ok=True)
     coverage=[];events=[];fresh=0;cached=0
-    for manifest_path in sorted(library.glob('course-*/manifest.json')):
+    for manifest_path in semester.manifests(library):
         manifest=json.loads(manifest_path.read_text());cid=manifest_path.parent.name.removeprefix('course-')
         cname=manifest.get('course_name',cid);year_match=re.search(r'20\d{2}',cname)
         if not year_match:
@@ -172,7 +181,7 @@ def build(library, runtime):
                 extracted = candidates(text,year,item.get('title') or source['name'],collection=='pages')
                 announcement = item.get('source_type') == 'announcement'
                 for candidate in extracted:
-                    if announcement or re.search(r'\b(extend\w*|reschedul\w*|postpon\w*|cancel\w*|moved|instead|tomorrow|next\s+\w+|room change)\b', candidate['evidence'], re.I):
+                    if (announcement and not announcement_is_explicit(candidate)) or re.search(r'\b(extend\w*|reschedul\w*|postpon\w*|cancel\w*|moved|instead|tomorrow|next\s+\w+|room change|will not|not held)\b', candidate['evidence'], re.I):
                         candidate['review'] = True
                         candidate['time_note'] = 'Announcement or change wording: verify interpretation before syncing.'
                     # Normalize matching named assessment identities across sources.
@@ -195,8 +204,12 @@ def build(library, runtime):
             for source in ev['sources']:
                 if source not in existing['sources']:existing['sources'].append(source)
             existing['tentative'] |= ev['tentative'];existing['review'] |= ev['review']
+            existing['class_time_reference'] = existing.get('class_time_reference') or ev.get('class_time_reference')
+            existing['class_session_confirmation'] = existing.get('class_session_confirmation') or ev.get('class_session_confirmation')
     events=list(grouped.values())
     for ev in events:
+        if ev.get('class_session_confirmation'):
+            ev['tentative'] = False
         if ev['date'] and re.search(r'concept deck|assignment \d+|^midterm(?: \d+| exam)$|^quiz \d+|^final exam$',ev['title'],re.I):
             other=sorted({e['date'] for e in events if e['course_id']==ev['course_id'] and e['title']==ev['title'] and e['date'] and e['date']!=ev['date']})
             if other:ev['conflict_dates']=other;ev['review']=True
@@ -208,11 +221,13 @@ def build(library, runtime):
 
 
 def feed(library, runtime):
+    runtime=runtime/semester.current()['term']
+    runtime.mkdir(parents=True,exist_ok=True)
     with LOCK:
-        paths=sorted(library.glob('course-*/manifest.json'))
+        paths=semester.manifests(library)
         # Watch local file changes as well as manifests. Hashes are verified on
         # rebuild; inexpensive stats avoid reading every PDF on each UI poll.
-        signature=[]
+        signature=[semester.current()['term']]
         for p in paths:
             raw=p.read_text();signature.append(raw)
             manifest=json.loads(raw)

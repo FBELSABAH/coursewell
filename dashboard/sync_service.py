@@ -7,6 +7,7 @@ import hashlib
 from pathlib import Path
 import sys
 import threading
+import semester
 import time
 
 PROJECT = Path('/Users/fbelsabah/Documents/academic-ai-assistant')
@@ -60,6 +61,13 @@ class SyncService:
         # Upgrade older status files without discarding the last meaningful run.
         self.state.setdefault('change_history', [])
         self._remember_changes(self.state.get('changes', []))
+        self._remember_fetch()
+        names=[c.get('name','') for c in self.state.get('courses',[])]
+        self.state.setdefault('semester',next((semester.term_from_name(n) for n in names if semester.term_from_name(n)),semester.current()['term']))
+
+    def _remember_fetch(self):
+        if self.state.get('status') in ('complete','partial') and self.state.get('finished_at'):
+            self.state['last_fetch']={key:deepcopy(self.state.get(key)) for key in ('finished_at','courses','changes','status','semester')}
 
     def _remember_changes(self, changes):
         """Keep a durable timeline separate from the current run's counters."""
@@ -70,17 +78,23 @@ class SyncService:
             identity=json.dumps([observed, change.get('course_id'), change.get('source'), change['kind'], change.get('sha256')])
             change_id=hashlib.sha256(identity.encode()).hexdigest()[:24]
             if change_id not in known:
-                history.append(dict(change,id=change_id,observed_at=observed))
+                history.append(dict(change,id=change_id,observed_at=observed,semester=semester.term_from_name(change.get('course','')) or self.state.get('semester') or semester.current()['term']))
                 known.add(change_id)
 
     def snapshot(self):
         with self.lock:
-            return deepcopy(self.state)
+            result=deepcopy(self.state)
+            active=semester.current()['term']
+            if result.get('semester') and result['semester']!=active:
+                result.update(status='idle',courses=[],changes=[],last_fetch={},finished_at=None,total=0,completed=0,message='Update to fetch this semester.')
+            result['change_history']=[c for c in result.get('change_history',[]) if (c.get('semester') or semester.term_from_name(c.get('course','')))==active]
+            return result
 
     def update(self, **fields):
         with self.lock:
             self.state.update(fields)
             self._remember_changes(fields.get('changes', []))
+            self._remember_fetch()
             atomic_write(self.path, json.dumps(self.state, indent=2).encode())
 
     def start(self, reconnect=False):
@@ -89,7 +103,7 @@ class SyncService:
                 return False
             # Persist migrated history before resetting the transient run state.
             self._remember_changes(self.state.get('changes', []))
-            self.state.update(status='connecting' if reconnect else 'running', message='Opening Microsoft sign-in…' if reconnect else 'Checking Moodle sign-in…', started_at=now(), finished_at=None, courses=[], changes=[], total=0, completed=0, error_type=None)
+            self.state.update(status='connecting' if reconnect else 'running', message='Opening Microsoft sign-in…' if reconnect else 'Checking Moodle sign-in…', started_at=now(), finished_at=None, semester=semester.current()['term'], courses=[], changes=[], total=0, completed=0, error_type=None)
             atomic_write(self.path, json.dumps(self.state, indent=2).encode())
         threading.Thread(target=self._run, args=(reconnect,), daemon=True).start()
         return True
@@ -142,9 +156,9 @@ class SyncService:
                 state = self.reconnect()
                 session = session_from_state(state, settings.moodle_home_url)
                 discovered = enrolled_courses(session)
-            courses = sorted((c for c in discovered if term_match(c.name, 'F2026')), key=lambda c:c.name)
+            courses = sorted((c for c in discovered if semester.term_from_name(c.name) == semester.current()['term']), key=lambda c:c.name)
             if not courses:
-                self.update(status='error', message='No Fall 2026 courses were found. Existing files were kept.', finished_at=now())
+                self.update(status='error', message='No '+semester.current()['label']+' courses were found. Existing files were kept.', finished_at=now())
                 return
             self.update(status='running', total=len(courses), message=f'Found {len(courses)} courses. Updating materials…')
             for course in courses:
@@ -156,7 +170,7 @@ class SyncService:
                     run = library.sync()
                     library.manifest['course_name'] = course.name
                     library.save_manifest()
-                    _, counts = publish(library, Path.home()/'Documents'/'University Courses', 'Fall 2026', state_root)
+                    _, counts = publish(library, Path.home()/'Documents'/'University Courses', semester.current()['label'], state_root)
                     result.update(status=run['status'], verified=run['files_verified'], new=run['new'], updated=run['updated'], unchanged=run['unchanged'], issues=len(run['errors']), recorded_only=len(run['not_downloaded']))
                     for change in changed_files(before, library.manifest):
                         changes.append(dict(change, course=course.name, course_id=course.moodle_course_id))

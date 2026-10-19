@@ -1423,3 +1423,115 @@ nav button,.side-course{
 [data-theme="dark"] .cal-type-assignment { --event-color:#97a9ff; }
 [data-theme="dark"] .cal-type-class { --event-color:#aeb6bb; }
 [data-theme="dark"] .cal-type-assessment { --event-color:#d69bea; }
+
+/* Discover uses existing workspace surfaces and typography. */
+.discover-connections{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin:20px 0}
+.discover-connections h3{font-size:16px;margin:0 0 12px}
+.discover-connections select{display:block;max-width:100%;margin:8px 0;padding:10px}
+.discover-item{padding:24px 0;border-bottom:1px solid var(--border,#dce3dd);overflow-wrap:anywhere}
+.discover-item h2{font-size:20px}.discover-item p{margin:12px 0}
+.discover-item blockquote{margin:16px 0;padding:0 16px;border-left:3px solid var(--green,#256b55);white-space:pre-wrap}
+.discover-connections label{display:block}.discover-connections input{margin-right:8px}
+@media(max-width:700px){.discover-connections{grid-template-columns:1fr;gap:24px}.discover-item .section-title{align-items:flex-start;gap:12px}}
+
+.cal-type-event{--event-color:#287d58}
+
+/* Source review retains the app's green palette and typography. */
+.ai-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:650;letter-spacing:.02em;color:var(--accent,#246b57);background:var(--active,#e8f1eb);border:1px solid var(--line,#dce5de);border-radius:5px;padding:2px 6px;white-space:nowrap;vertical-align:middle;margin-left:5px}
+.calendar-review-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:start}
+.calendar-review{min-width:0;margin-top:0;position:sticky;top:88px;max-height:calc(100vh - 110px);overflow:auto}
+.calendar-review h2{font-size:18px}.calendar-review .discover-item{padding:18px 0}.calendar-review .discover-item h3{font-size:15px;line-height:1.45;margin:0}.calendar-review .section-title{align-items:start}
+.discover-item blockquote{margin:12px 0;padding:10px 14px;border-left:2px solid var(--line,#dce5de);font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
+.discover-item small,.proposal-date{color:var(--muted,#62736c)}.review-check{display:flex;align-items:start;gap:8px;margin:12px 0;font-size:13px}.review-check input{margin-top:3px}.discover-item .cal-actions{margin-top:12px}
+#dialog select,#dialog input[type=date]{display:block;width:100%;margin:8px 0 16px;min-height:44px}
+@media(max-width:1200px){.calendar-review-layout{grid-template-columns:minmax(0,1fr)}.calendar-review{position:static;max-height:none;order:0}.calendar-review .discover-item:nth-of-type(n+3){display:none}}
+
+/* Work first; account controls are grouped in Settings. */
+.calendar-review-layout.no-suggestions{grid-template-columns:minmax(0,1fr)}
+.calendar-intro{margin-bottom:20px}
+.settings-sections{max-width:1000px;display:grid;gap:28px}
+.settings-sections .cal-connection,.settings-sections .study-connect{margin:0}
+.settings-sections .study-connect{display:flex;flex-wrap:wrap;gap:20px}
+.settings-sections .study-connect>div{min-width:0;flex:1 1 280px}
+.settings-sections .study-actions{align-content:start}
+#attentionPanel[hidden],#calendarReview[hidden]{display:none}
+#sidebar [data-nav="settings"]{margin-top:12px;border-top:1px solid var(--line);border-radius:0}
+@media(max-width:650px){.calendar-intro{align-items:center}.settings-sections{gap:20px}.settings-sections .study-connect{display:block}.settings-sections .study-actions{margin-top:16px}}
+
+/* Compact update stages. Indeterminate motion never implies a fake percentage. */
+.sync-panel{background:none;padding:0;margin:0 0 24px;border-radius:0}
+.update-stage{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.update-stage p{margin:0;color:var(--ink);font-weight:500}
+.update-stage small{color:var(--muted)}
+.sync-track.indeterminate span{animation:sync-sweep 1.8s linear infinite}
+.update-notice{display:flex;align-items:baseline;gap:8px 16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:0 0 24px}
+.update-notice[hidden]{display:none}
+.update-notice a{color:var(--green)}
+.sync-summary{gap:8px 20px}
+#fetchResult:empty{display:none}
+#lastChecked{white-space:nowrap}
+.academic-review-details{margin:0 0 16px 44px;padding:0 0 16px;border-bottom:1px solid var(--line)}
+.academic-review-details>summary{font-size:13px;color:var(--green)}
+.academic-review-details .discover-item:last-child{border-bottom:0;padding-bottom:0}
+.calendar-review .discover-item:nth-of-type(n+3){display:block}
+.optional-tabs{gap:6px;flex-wrap:wrap}
+.optional-tabs button{padding:8px 10px}
+/* Settings have one anatomy: named service, divided rows, aligned controls. */
+.settings-sections{max-width:1040px;gap:24px}
+.settings-section{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;min-width:0}
+.settings-section>header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:24px 28px;border-bottom:1px solid var(--line)}
+.settings-section h2{font-size:18px;margin:0}
+.settings-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,260px);align-items:center;gap:24px;margin:0 28px;padding:20px 0;border-bottom:1px solid var(--line)}
+.settings-row h3{font-size:14px;font-weight:600;margin:0 0 5px}
+.settings-row p{font-size:13px;line-height:1.6;color:var(--muted);margin:0;max-width:540px;overflow-wrap:anywhere}
+.settings-control{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px 16px;min-width:0}
+.settings-control a{font-size:13px;color:var(--green);min-height:44px;display:inline-flex;align-items:center;text-align:right}
+.settings-control .primary{min-width:156px;min-height:44px;padding:10px 16px;font-size:13px}
+.settings-section select{min-height:44px;max-width:100%;width:100%;border:1px solid var(--line);border-radius:6px;padding:8px 12px;color:var(--ink);background:var(--surface);font:inherit;font-size:13px}
+.settings-details{margin:0 28px;padding:16px 0;font-size:13px;line-height:1.7}
+.settings-details+ .settings-details{border-top:1px solid var(--line)}
+.settings-details summary{min-height:28px;color:var(--muted)}
+.settings-details p{color:var(--muted)}
+.settings-details .settings-control{justify-content:flex-start}
+.settings-details select{max-width:360px;display:block;margin:8px 0 16px}
+.settings-toggle{min-height:44px;display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px}
+.settings-toggle input{accent-color:var(--green);width:18px;height:18px}
+.settings-error,.settings-loading{margin:20px 28px;font-size:13px}
+@media(max-width:650px){
+ .update-stage{align-items:flex-start;flex-direction:column;gap:4px}
+ .sync-summary{margin-left:0;flex-basis:100%;justify-content:space-between;font-size:12px}
+ .settings-section>header{padding:20px}
+ .settings-row{grid-template-columns:minmax(0,1fr);gap:12px;margin:0 20px;padding:20px 0}
+ .settings-control{justify-content:flex-start}
+ .settings-control a{text-align:left}
+ .settings-details{margin:0 20px}
+ .academic-review-details{margin-left:0}
+}
+@media(prefers-reduced-motion:reduce){.sync-track.indeterminate span{animation:none;width:100%;opacity:.5;transform:none}}
+
+/* Determinate stage progress: no looping sweep or fabricated time percentage. */
+.sync-track.determinate span{width:100%;transform:scaleX(0);transform-origin:left;animation:none;transition:transform 1.4s linear}
+@media(prefers-reduced-motion:reduce){.sync-track.determinate span{transition:none}}
+
+.settings-control form{display:grid;gap:10px;width:100%}
+#semesterFeedback:not(:empty){margin:16px 28px;font-size:13px;color:var(--muted)}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* One decision at a time; suggestions never displace the calendar. */
+.suggestion-card{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:20px;animation:suggestion-enter 180ms ease-out;overflow-wrap:anywhere}
+.suggestion-meta{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:12px;margin-bottom:16px}
+.suggestion-card h3{font-size:20px;line-height:1.35;margin:0 0 20px}
+.suggestion-facts{margin:0;display:grid;gap:12px;font-size:13px}.suggestion-facts div{display:grid;grid-template-columns:44px 1fr;gap:10px}.suggestion-facts dt{color:var(--muted)}.suggestion-facts dd{margin:0}
+.suggestion-summary{font-size:14px;line-height:1.6;margin:18px 0}.suggestion-card details{font-size:13px;margin:16px 0}.suggestion-card blockquote{margin:12px 0;padding-left:12px;border-left:2px solid var(--line)}
+.suggestion-actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:24px}.suggestion-actions button{min-height:44px;justify-content:center;width:100%}.suggestion-actions .textbutton{border:1px solid var(--line);border-radius:8px}
+.suggestion-status{font-size:13px;min-height:0;margin:12px 0}.suggestion-status:empty{display:none}.suggestion-history{margin-top:20px;font-size:13px}.suggestion-history div{padding:14px 0;border-bottom:1px solid var(--line)}.suggestion-history small{display:block;color:var(--muted);margin-top:6px}
+.schedule-summary{margin:20px 0;font-size:13px}.schedule-summary p{margin:12px 0}
+@keyframes suggestion-enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.suggestion-card{animation:none}}
+
+/* Approved watercolor sheet, cropped in CSS without altering the artwork. */
+.page-art{display:block;flex:none;width:132px;aspect-ratio:500/330;background-image:url('/brand/coursewell-watercolors.png');background-repeat:no-repeat;background-size:307.2% 310.303%;background-position:var(--art-x) var(--art-y);mix-blend-mode:multiply;pointer-events:none;mask-image:radial-gradient(ellipse at center,#000 56%,transparent 74%)}
+.art-overview{--art-x:0%;--art-y:10.087%}.art-courses{--art-x:50.193%;--art-y:10.087%}.art-calendar{--art-x:99.421%;--art-y:10.087%}.art-study{--art-x:0%;--art-y:77.81%}.art-library{--art-x:50.193%;--art-y:77.81%}.art-settings{--art-x:99.421%;--art-y:77.81%}
+.intro:has(.page-art){display:grid;grid-template-columns:minmax(0,1fr) auto auto;column-gap:24px;align-items:center;min-height:100px}.intro:has(.page-art)>div:first-child{min-width:0}.intro:has(.page-art)>:last-child:is(.page-art){grid-column:3}.intro .art-settings{width:104px}
+[data-theme="dark"] .page-art{filter:invert(1) hue-rotate(180deg);mix-blend-mode:screen;opacity:.7}
+@media(max-width:650px){.intro:has(.page-art){grid-template-columns:minmax(0,1fr) 76px;gap:12px;min-height:76px}.intro .page-art,.intro .art-settings{width:76px}.intro:has(.page-art)>:last-child:is(.page-art){grid-column:2}.intro:has(.page-art)>button,.intro:has(.page-art)>a{grid-row:2;grid-column:1/-1;justify-self:start}}

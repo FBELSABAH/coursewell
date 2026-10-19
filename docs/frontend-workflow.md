@@ -56,3 +56,6 @@ Codex supports project skills in `.agents/skills/`, scoped to the repository wor
 - Actual browser launch was attempted against the app. This Codex session's macOS sandbox aborted Chrome (SIGABRT); attach to existing Chrome also failed because remote debugging is not enabled. No browser-rendering success is claimed.
 - A native Codex skills/list discovery attempt was blocked by local app-server runtime write/permission restrictions. On-disk structure is validated, but live native discovery is not yet confirmed.
 - These environmental limitations do not justify weakening browser security, changing the user's ordinary Chrome profile, or bypassing the sandbox. Finish browser verification from an approved execution environment before calling setup fully verified.
+
+## Reuse the browser session
+For verification, reuse an existing Coursewell tab. Do not launch a new browser or reopen the app for each page or viewport. When a server restart is needed, the launcher supports `--background` (start/restart without opening Chrome). If macOS blocks restarting the process, request one app reopen and continue in the existing tab.

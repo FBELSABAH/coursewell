@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock
 from study_ai import StudyAI
+import semester
 from chatgpt_connection import StudyError
 
 
@@ -16,7 +17,7 @@ class StudyTests(unittest.TestCase):
         self.course.mkdir(parents=True)
         self.text = 'A tree is a connected graph containing no cycles. A forest contains no cycles. The assignment was originally due Friday but now due Monday.'
         (self.course/'notes.txt').write_text(self.text)
-        self.manifest = {'course_name':'Demo', 'files':{'https://example.test/notes':{
+        self.manifest = {'course_name':semester.current()['term']+' Demo (MATH-2420-01)', 'files':{'https://example.test/notes':{
             'path':'notes.txt','title':'Trees','sha256':hashlib.sha256(self.text.encode()).hexdigest(),
             'verified_in_last_run':True}}}
         self.save()

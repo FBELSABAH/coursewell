@@ -10,7 +10,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 
-SUPPORTED = {'.pdf','.docx','.pptx','.xlsx','.odt','.ods','.odp','.txt','.md','.json','.csv','.tsv','.html','.htm','.png','.jpg','.jpeg','.tif','.tiff','.webp'}
+SUPPORTED = {'.pdf','.docx','.pptx','.xlsx','.odt','.ods','.odp','.txt','.md','.json','.csv','.tsv','.html','.htm','.png','.jpg','.jpeg','.tif','.tiff','.webp','.eml','.ics','.zip'}
 PDF_LOCK = threading.Lock()  # PDFium is not thread-safe.
 
 
@@ -55,7 +55,46 @@ def read_document(path, native_reader):
         return {'pages':[],'notes':['File exceeds 100 MB reader limit; needs review.'],'ocr_pages':[]}
     if ext not in SUPPORTED:
         return {'pages':[],'notes':['Unsupported format; needs review.'],'ocr_pages':[]}
-    if ext in ('.png','.jpg','.jpeg','.tif','.tiff','.webp'):
+    if ext=='.zip':
+        pages=[]
+        with zipfile.ZipFile(path) as archive, tempfile.TemporaryDirectory() as tmp:
+            members=[m for m in archive.infolist() if not m.is_dir()]
+            if len(members)>100 or sum(m.file_size for m in members)>100*1024*1024:
+                return {'pages':[],'notes':['Archive exceeds 100 files or 100 MB expanded size; needs review.'],'ocr_pages':[]}
+            for index,member in enumerate(members):
+                suffix=Path(member.filename).suffix.lower()
+                if suffix=='.zip':notes.append(member.filename+': nested archive needs review.');continue
+                # Generated flat paths prevent zip-slip and never execute archive content.
+                target=Path(tmp)/(str(index)+suffix)
+                try:
+                    target.write_bytes(archive.read(member))
+                    document=read_document(target,native_reader)
+                    pages.extend((f'{member.filename} / {n}',text) for n,text in document['pages'])
+                    notes.extend(member.filename+': '+note for note in document['notes'])
+                except Exception:notes.append(member.filename+': could not read archive member.')
+    elif ext=='.eml':
+        from email import policy
+        from email.parser import BytesParser
+        message=BytesParser(policy=policy.default).parsebytes(path.read_bytes());pages=[]
+        body=message.get_body(preferencelist=('plain','html'))
+        if body:
+            text=body.get_content()
+            if body.get_content_type()=='text/html':
+                parser=HTMLText();parser.feed(text);text=''.join(parser.parts)
+            pages=[(None,'Subject: '+str(message.get('Subject',''))+'\nDate: '+str(message.get('Date',''))+'\n'+text)]
+        with tempfile.TemporaryDirectory() as tmp:
+            for index,part in enumerate(message.iter_attachments()):
+                if index>=30:notes.append('Email has more than 30 attachments; needs review.');break
+                suffix=Path(part.get_filename() or '').suffix.lower()
+                if suffix in ('.eml','.zip'):notes.append('Nested email/archive attachment needs review.');continue
+                target=Path(tmp)/(str(index)+suffix)
+                try:
+                    target.write_bytes(part.get_payload(decode=True) or b'')
+                    doc=read_document(target,native_reader);pages.extend(doc['pages']);notes.extend(doc['notes'])
+                except Exception:notes.append('An email attachment could not be read.')
+    elif ext=='.ics':
+        pages=[(None,path.read_text(errors='replace'))]
+    elif ext in ('.png','.jpg','.jpeg','.tif','.tiff','.webp'):
         from PIL import Image, ImageOps
         pages=[]
         with Image.open(path) as image, tempfile.TemporaryDirectory() as tmp:
@@ -124,7 +163,24 @@ def read_document(path, native_reader):
         if ext in ('.docx','.pptx'):
             with zipfile.ZipFile(path) as archive:
                 if sum(i.file_size for i in archive.infolist())>100*1024*1024:raise ValueError('Expanded document exceeds reader limit')
-        pages=native_reader(path)
+        if ext == '.docx':
+            with zipfile.ZipFile(path) as archive:
+                ns = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+                root = ET.fromstring(archive.read('word/document.xml'))
+                body = root.find(ns+'body')
+                lines = []
+                for node in ([] if body is None else body):
+                    if node.tag == ns+'tbl':
+                        for row in node.findall(ns+'tr'):
+                            lines.append(' | '.join(' '.join(t.text or '' for t in cell.iter(ns+'t'))
+                                                    for cell in row.findall(ns+'tc')))
+                    elif node.tag == ns+'p':
+                        lines.append(''.join(t.text or '' for t in node.iter(ns+'t')))
+                pages = [(None, '\n'.join(lines))]
+                if any(n.startswith('word/media/') for n in archive.namelist()):
+                    notes.append('Embedded images may contain additional dates; inspect the original document.')
+        else:
+            pages=native_reader(path)
     if ocr_pages:notes.append('OCR text can misread dates; OCR-derived events require review.')
     if not pages or sum(len(t.strip()) for _,t in pages)<50:notes.append('Little readable text; needs visual review.')
     elif any(len(t.strip())<25 for _,t in pages):notes.append('Some pages have little text; needs visual review.')

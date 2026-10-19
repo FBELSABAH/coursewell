@@ -80,5 +80,14 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(service.snapshot()['status'],'partial')
             self.assertEqual([c['status'] for c in service.snapshot()['courses']],['error','complete'])
 
+    def test_last_fetch_survives_running_and_failed_attempt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'status.json';service=SyncService(path)
+            service.update(status='complete',finished_at='2026-10-17T12:00:00Z',courses=[{'verified':4}],changes=[])
+            with patch('sync_service.threading.Thread'):service.start()
+            self.assertEqual(service.snapshot()['last_fetch']['courses'][0]['verified'],4)
+            service.update(status='error',finished_at='2026-10-18T12:00:00Z')
+            self.assertEqual(SyncService(path).snapshot()['last_fetch']['finished_at'],'2026-10-17T12:00:00Z')
+
 if __name__=='__main__':
     unittest.main()
